@@ -1,0 +1,12 @@
+[package]
+name = "cert_machine"
+version = "0.1.0"
+authors = ["Nikita Mazur <nkamzur@yandex.ru>"]
+
+[dependencies]
+#openssl = { version = "0.10.12", features = ["vendored"] }
+openssl = "0.10.12"
+
+[profile.release]
+#lto = true
+#panic = 'abort'
