@@ -1,0 +1,32 @@
+cluster_name = "Exon Cluster"
+validity_days = 365
+key_size = 2048
+master_san = ["192.168.0.1", "192.0.0.1", "master-01.novalocal", "kube.example.com"]
+
+[[worker]]
+filename = "node1"
+hostname = "node-01"
+san = ["192.168.0.11", "node-01", "node-01.novalocal"]
+
+[[worker]]
+filename = "node2"
+hostname = "node-02"
+san = ["192.168.0.12", "node-02", "node-02.novalocal"]
+
+[[worker]]
+filename = "node3"
+hostname = "node-03"
+san = ["192.168.0.13", "node-03", "node-03.novalocal"]
+
+[[etcd_server]]
+filename = "etcd1"
+hostname = "master01"
+san = ["192.168.0.01", "master-01", "master-01.novalocal"]
+
+[ca]
+country = "LV"
+organization = "Exon Lab"
+organization_unit = "IFR"
+locality = "Riga"
+validity_days = 1024
+key_size = 4096
