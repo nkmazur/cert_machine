@@ -20,7 +20,7 @@ pub struct CertificateParameters<'a> {
     pub key_length: u32,
     pub serial_number: u32,
     pub validity_days: u32,
-    pub subject: &'a Subject,
+    pub subject: &'a Subject<'a>,
     pub key_usage: Vec<String>,
     pub extended_key_usage: Option<Vec<String>>,
     pub basic_constraints: Option<Vec<String>>,
@@ -28,16 +28,16 @@ pub struct CertificateParameters<'a> {
     pub is_self_signed: bool,
     pub ca_key: Option<&'a openssl::pkey::PKey<openssl::pkey::Private>>,
     pub ca_crt: Option<&'a openssl::x509::X509>,
-    pub filename: String,
+    pub filename: &'a str,
 }
 
-pub struct Subject {
-    pub common_name: String,                    // CN
-    pub country: Option<String>,                // C
-    pub organization: Option<String>,           // O
-    pub organization_unit: Option<String>,      // OU
-    pub state_or_province_name: Option<String>, // ST
-    pub locality: Option<String>,               // L
+pub struct Subject<'a> {
+    pub common_name: &'a str,                    // CN
+    pub country: Option<&'a str>,                // C
+    pub organization: Option<&'a str>,           // O
+    pub organization_unit: Option<&'a str>,      // OU
+    pub state_or_province_name: Option<&'a str>, // ST
+    pub locality: Option<&'a str>,               // L
 }
 
 // This function verifies is SAN an IP or hoatname
@@ -197,8 +197,8 @@ pub fn gen_cert(config: &CertificateParameters) {
 
     let pem = certificate.to_pem().unwrap();
 
-    let crt_filename = format!("{}.crt",config.filename);
-    let key_filename = format!("{}.key",config.filename);
+    let crt_filename = format!("certs/{}.crt",config.filename);
+    let key_filename = format!("certs/{}.key",config.filename);
 
     fs::write(crt_filename, pem).expect("Unable to write file!");
     fs::write(key_filename, key).expect("Unable to write file!");
