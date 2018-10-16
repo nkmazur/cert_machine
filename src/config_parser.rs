@@ -26,7 +26,6 @@ pub struct Instance {
 #[derive(Debug)]
 #[derive(Deserialize)]
 pub struct Ca {
-    // common_name: String,
     pub country: Option<String>,
     pub organization: Option<String>,
     pub organization_unit: Option<String>,
@@ -45,7 +44,6 @@ impl Config {
 
         let config: Config = toml::from_str(&contents).unwrap();
 
-        // println!("{:#?}", config);
         Box::new(config)
     }
 }

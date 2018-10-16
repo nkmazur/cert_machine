@@ -24,7 +24,7 @@ pub struct CertificateParameters<'a> {
     pub key_usage: Vec<String>,
     pub extended_key_usage: Option<Vec<String>>,
     pub basic_constraints: Option<Vec<String>>,
-    pub san: Option<Vec<String>>,
+    pub san: Option<Vec<&'a str>>,
     pub is_self_signed: bool,
     pub ca_key: Option<&'a openssl::pkey::PKey<openssl::pkey::Private>>,
     pub ca_crt: Option<&'a openssl::x509::X509>,
@@ -61,7 +61,7 @@ fn is_ip(string: &str) -> bool {
     true
 }
 
-pub fn gen_cert(config: &CertificateParameters) {
+pub fn gen_cert(config: &CertificateParameters) -> (X509, PKey<openssl::pkey::Private>) {
     //Generate new key for cert
     let rsa = Rsa::generate(config.key_length).unwrap();
     let key = rsa.private_key_to_pem().unwrap();
@@ -202,4 +202,6 @@ pub fn gen_cert(config: &CertificateParameters) {
 
     fs::write(crt_filename, pem).expect("Unable to write file!");
     fs::write(key_filename, key).expect("Unable to write file!");
+
+    (certificate, pkey)
 }
