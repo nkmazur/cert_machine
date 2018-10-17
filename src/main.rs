@@ -29,4 +29,6 @@ fn main() {
     for instance in config.etcd_server.iter() {
         kubernetes_certs::gen_etcd_cert(&instance, &ca_key, &ca_cert);
     }
+
+    kubernetes_certs::kube_certs();
 }
