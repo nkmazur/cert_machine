@@ -24,21 +24,19 @@ pub fn write_bundle_to_file(bundle: &(X509, Vec<u8>), filename: &str) {
     fs::write(key_filename, key).expect("Unable to write file!");
 }
 
-pub fn gen_main_ca_cert(config: &Config) {
-    let ca_subject = Subject {
-        common_name: &config.cluster_name,
-        country: opt_str(&config.ca.country),
-        organization: opt_str(&config.ca.organization),
-        organization_unit: opt_str(&config.ca.organization_unit),
-        state_or_province_name: opt_str(&config.ca.state_or_province_name),
-        locality: opt_str(&config.ca.locality),
-    };
-
+pub fn gen_main_ca_cert(config: &Config)  -> Result<(X509, Vec<u8>), &'static str> {
     let ca_cert = CertificateParameters {
         key_length: config.ca.key_size,
         serial_number: 1,
         validity_days: config.ca.validity_days,
-        subject: ca_subject,
+        subject: Subject {
+            common_name: &config.cluster_name,
+            country: opt_str(&config.ca.country),
+            organization: opt_str(&config.ca.organization),
+            organization_unit: opt_str(&config.ca.organization_unit),
+            state_or_province_name: opt_str(&config.ca.state_or_province_name),
+            locality: opt_str(&config.ca.locality),
+        },
         key_usage: vec![
             "digital_signature",
             "key_encipherment",
@@ -46,9 +44,7 @@ pub fn gen_main_ca_cert(config: &Config) {
             "critical",
         ],
         extended_key_usage: None,
-        basic_constraints: Some(vec![
-            "ca",
-            ]),
+        basic_constraints: Some(vec!["ca"]),
         san: None,
         is_self_signed: true,
         ca_key: None,
@@ -56,24 +52,7 @@ pub fn gen_main_ca_cert(config: &Config) {
     };
 
     println!("Creating CA with name: {}", config.cluster_name);
-    let result = ca_cert.gen_cert();
-
-    let (certificate, key) = match result {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!("{}", error);
-            return
-        }
-    };
-
-    let pem = certificate.to_pem().unwrap();
-
-    let crt_filename = format!("certs/ca.crt");
-    let key_filename = format!("certs/ca.key");
-
-    fs::write(crt_filename, pem).expect("Unable to write file!");
-    fs::write(key_filename, key).expect("Unable to write file!");
-
+    ca_cert.gen_cert()
 }
 
 pub fn gen_ca_cert(cn: &str, main_ca: Option<(&PKey<Private>, &X509)>) -> Result<(X509, Vec<u8>), &'static str> {

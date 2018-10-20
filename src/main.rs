@@ -7,27 +7,40 @@ mod config_parser;
 mod kubernetes_certs;
 
 use config_parser::Config;
-use openssl::x509::X509;
+//use openssl::x509::X509;
 use openssl::pkey::PKey;
-use std::fs;
+//use std::fs;
 
 fn main() {
     let config = Config::new("config.toml");
 
-    kubernetes_certs::gen_main_ca_cert(&config);
+    let (ca_cert, ca_key) = match kubernetes_certs::gen_main_ca_cert(&config) {
+        Ok(bundle) => {
+            kubernetes_certs::write_bundle_to_file(&bundle, "ca");
+            bundle
+        },
+        Err(error) => {
+            eprintln!("{}", error);
+            return
+        }
+    };
+    let ca_key = PKey::private_key_from_pem(&ca_key).unwrap();
 
-    let ca_key_file = fs::read("certs/ca.key").expect("Unable to open ca.key");
-    let ca_key = PKey::private_key_from_pem(&ca_key_file).expect("Unable to parse ca.key");
-
-    let ca_cert_file = fs::read("certs/ca.crt").expect("Unable to open ca.crt");
-    let ca_cert = X509::from_pem(&ca_cert_file).expect("Unable to parse ca.crt");
+//    let ca_key_file = fs::read("certs/ca.key").expect("Unable to open ca.key");
+//    let ca_key = PKey::private_key_from_pem(&ca_key_file).expect("Unable to parse ca.key");
+//
+//    let ca_cert_file = fs::read("certs/ca.crt").expect("Unable to open ca.crt");
+//    let ca_cert = X509::from_pem(&ca_cert_file).expect("Unable to parse ca.crt");
 
     for instance in config.worker.iter() {
         kubernetes_certs::gen_kubelet_cert(&instance, &ca_key, &ca_cert);
     }
 
     match kubernetes_certs::gen_ca_cert("etcd", Some((&ca_key, &ca_cert))) {
-        Ok(bundle) => kubernetes_certs::write_bundle_to_file(&bundle, "etcd/etcd-ca"),
+        Ok(bundle) => {
+            kubernetes_certs::write_bundle_to_file(&bundle, "etcd/etcd-ca");
+            bundle
+        },
         Err(error) => {
             eprintln!("{}", error);
             return
