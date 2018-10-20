@@ -12,7 +12,7 @@ fn opt_str(opt_string: &Option<String>) -> Option<&str> {
     }
 }
 
-fn write_bundle_to_file(bundle: &(X509, Vec<u8>), filename: &str) {
+pub fn write_bundle_to_file(bundle: &(X509, Vec<u8>), filename: &str) {
     let (certificate, key) = bundle;
 
     let pem = certificate.to_pem().unwrap();
@@ -76,7 +76,7 @@ pub fn gen_main_ca_cert(config: &Config) {
 
 }
 
-pub fn gen_ca_cert(cn: &str, filename: &str, main_ca: Option<(&PKey<Private>, &X509)>) {
+pub fn gen_ca_cert(cn: &str, main_ca: Option<(&PKey<Private>, &X509)>) -> Result<(X509, Vec<u8>), &'static str> {
     let mut ca_cert = CertificateParameters::default(&cn);
 
     ca_cert.key_usage = vec![
@@ -95,13 +95,7 @@ pub fn gen_ca_cert(cn: &str, filename: &str, main_ca: Option<(&PKey<Private>, &X
         ca_cert.ca_crt = Some(&main_ca_cert);
     }
 
-    match ca_cert.gen_cert() {
-        Ok(bundle) => write_bundle_to_file(&bundle, filename),
-        Err(error) => {
-            eprintln!("{}", error);
-            return
-        }
-    };
+    ca_cert.gen_cert()
 }
 
 pub fn gen_kubelet_cert(worker: &Instance, ca_key: &PKey<Private>, ca_cert: &X509) {
@@ -216,8 +210,8 @@ pub fn gen_etcd_cert(worker: &Instance, ca_key: &PKey<Private>, ca_cert: &X509) 
 
     let pem = certificate.to_pem().unwrap();
 
-    let crt_filename = format!("certs/{}.crt", cert_filename);
-    let key_filename = format!("certs/{}.key", cert_filename);
+    let crt_filename = format!("certs/etcd/{}.crt", cert_filename);
+    let key_filename = format!("certs/etcd/{}.key", cert_filename);
 
     fs::write(crt_filename, pem).expect("Unable to write file!");
     fs::write(key_filename, key).expect("Unable to write file!");

@@ -26,7 +26,13 @@ fn main() {
         kubernetes_certs::gen_kubelet_cert(&instance, &ca_key, &ca_cert);
     }
 
-    kubernetes_certs::gen_ca_cert("etcd", "etcd-ca", Some((&ca_key, &ca_cert)));
+    match kubernetes_certs::gen_ca_cert("etcd", Some((&ca_key, &ca_cert))) {
+        Ok(bundle) => kubernetes_certs::write_bundle_to_file(&bundle, "etcd/etcd-ca"),
+        Err(error) => {
+            eprintln!("{}", error);
+            return
+        }
+    };
 
     for instance in config.etcd_server.iter() {
         kubernetes_certs::gen_etcd_cert(&instance, &ca_key, &ca_cert);
