@@ -275,6 +275,19 @@ pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config) {
             return
         }
     };
+    println!("Create CA: front proxy");
+    let (fp_ca_cert, fp_ca_key) = match gen_ca_cert("front-proxy-ca", Some((&ca_key, &ca_cert))) {
+        Ok(bundle) => {
+            write_bundle_to_file(&bundle, "front-proxy-ca");
+            bundle
+        },
+        Err(error) => {
+            eprintln!("{}", error);
+            return
+        }
+    };
+
+    let fp_ca_key = PKey::private_key_from_pem(&fp_ca_key).unwrap();
 
     println!("Creating cert: front-proxy-client");
 
@@ -290,8 +303,8 @@ pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config) {
     ]);
 
         api_client.is_self_signed = false;
-        api_client.ca_key = Some(&ca_key);
-        api_client.ca_crt = Some(&ca_cert);
+        api_client.ca_key = Some(&fp_ca_key);
+        api_client.ca_crt = Some(&fp_ca_cert);
 
     match api_client.gen_cert() {
         Ok(bundle) => write_bundle_to_file(&bundle, "front-proxy-client"),

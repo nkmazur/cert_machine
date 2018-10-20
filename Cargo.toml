@@ -5,11 +5,10 @@ authors = ["Nikita Mazur <nkamzur@yandex.ru>"]
 
 [dependencies]
 #openssl = { version = "0.10.12", features = ["vendored"] }
-openssl = "0.10.12"
+openssl = "0.10.14"
 toml = "0.4"
 serde_derive = "1.0.78"
 serde = "1.0.78"
 
 [profile.release]
-#lto = true
-#panic = 'abort'
+lto = "thin"

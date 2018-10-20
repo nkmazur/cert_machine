@@ -40,20 +40,18 @@ pub struct Subject<'a> {
 
 impl<'a> CertificateParameters<'a> {
     pub fn default(cn: &str) -> CertificateParameters {
-        let subject = Subject {
-            common_name: &cn,
-            country: None,
-            organization: None,
-            organization_unit: None,
-            state_or_province_name: None,
-            locality: None,
-        };
-
         let cert = CertificateParameters {
             key_length: 2048,
             serial_number: 0, //?
             validity_days: 100, //?
-            subject: subject,
+            subject: Subject {
+                common_name: &cn,
+                country: None,
+                organization: None,
+                organization_unit: None,
+                state_or_province_name: None,
+                locality: None,
+            },
             key_usage: vec![],
             extended_key_usage: None,
             basic_constraints: None,
