@@ -14,7 +14,7 @@ use std::fs;
 fn main() {
     let config = Config::new("config.toml");
 
-    kubernetes_certs::gen_ca_cert(&config);
+    kubernetes_certs::gen_main_ca_cert(&config);
 
     let ca_key_file = fs::read("certs/ca.key").expect("Unable to open ca.key");
     let ca_key = PKey::private_key_from_pem(&ca_key_file).expect("Unable to parse ca.key");
@@ -26,9 +26,11 @@ fn main() {
         kubernetes_certs::gen_kubelet_cert(&instance, &ca_key, &ca_cert);
     }
 
+    kubernetes_certs::gen_ca_cert("etcd", "etcd-ca", Some((&ca_key, &ca_cert)));
+
     for instance in config.etcd_server.iter() {
         kubernetes_certs::gen_etcd_cert(&instance, &ca_key, &ca_cert);
     }
 
-    kubernetes_certs::kube_certs();
+    kubernetes_certs::kube_certs(&ca_key, &ca_cert, &config);
 }

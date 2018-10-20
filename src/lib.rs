@@ -14,29 +14,27 @@ use openssl::x509::extension::SubjectAlternativeName;
 use openssl::x509::extension::BasicConstraints;
 use openssl::x509::X509Extension;
 use openssl::x509::{X509Name, X509};
-use std::fs;
 
 pub struct CertificateParameters<'a> {
     pub key_length: u32,
     pub serial_number: u32,
     pub validity_days: u32,
     pub subject: Subject<'a>,
-    pub key_usage: Vec<String>,
-    pub extended_key_usage: Option<Vec<String>>,
-    pub basic_constraints: Option<Vec<String>>,
+    pub key_usage: Vec<&'a str>,
+    pub extended_key_usage: Option<Vec<&'a str>>,
+    pub basic_constraints: Option<Vec<&'a str>>,
     pub san: Option<Vec<&'a str>>,
     pub is_self_signed: bool,
     pub ca_key: Option<&'a openssl::pkey::PKey<openssl::pkey::Private>>,
     pub ca_crt: Option<&'a openssl::x509::X509>,
-    pub filename: &'a str,
 }
 
 pub struct Subject<'a> {
     pub common_name: &'a str,                    // CN
     pub country: Option<&'a str>,                // C
     pub organization: Option<&'a str>,           // O
-    pub organization_unit: Option<&'a str>,      // OU
-    pub state_or_province_name: Option<&'a str>, // ST
+    pub organization_unit: Option<&'a str>,       // OU
+    pub state_or_province_name: Option<&'a str>,  // ST
     pub locality: Option<&'a str>,               // L
 }
 
@@ -56,20 +54,18 @@ impl<'a> CertificateParameters<'a> {
             serial_number: 0, //?
             validity_days: 100, //?
             subject: subject,
-            key_usage: vec![
-            ],
+            key_usage: vec![],
             extended_key_usage: None,
             basic_constraints: None,
             san: None,
             is_self_signed: true,
             ca_key: None,
             ca_crt: None,
-            filename: "set me",
         };
         cert
     }
 
-    pub fn gen_cert(&self) -> (X509, PKey<openssl::pkey::Private>) {
+    pub fn gen_cert(&self) -> Result<(X509, Vec<u8>), &'static str> {
         //Generate new key for cert
         let rsa = Rsa::generate(self.key_length).unwrap();
         let key = rsa.private_key_to_pem().unwrap();
@@ -203,15 +199,7 @@ impl<'a> CertificateParameters<'a> {
 
         let certificate: X509 = builder.build();
 
-        let pem = certificate.to_pem().unwrap();
-
-        let crt_filename = format!("certs/{}.crt",self.filename);
-        let key_filename = format!("certs/{}.key",self.filename);
-
-        fs::write(crt_filename, pem).expect("Unable to write file!");
-        fs::write(key_filename, key).expect("Unable to write file!");
-
-        (certificate, pkey)
+        Ok((certificate, key))
     }
 }
 
@@ -235,5 +223,3 @@ fn is_ip(string: &str) -> bool {
     }
     true
 }
-
-
