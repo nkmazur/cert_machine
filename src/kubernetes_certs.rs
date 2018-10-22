@@ -2,6 +2,7 @@ use std::fs;
 use openssl::x509::X509;
 use openssl::pkey::Private;
 use openssl::pkey::PKey;
+use openssl::rsa::Rsa;
 use config_parser::{Config, Instance};
 use cert_machine::{CertificateParameters, Subject};
 
@@ -12,13 +13,15 @@ fn opt_str(opt_string: &Option<String>) -> Option<&str> {
     }
 }
 
-pub fn write_bundle_to_file(bundle: &(X509, Vec<u8>), filename: &str) {
+pub fn write_bundle_to_file(bundle: &(X509, Vec<u8>), out_dir: &str, filename: &str) {
     let (certificate, key) = bundle;
 
     let pem = certificate.to_pem().unwrap();
 
-    let crt_filename = format!("certs/{}.crt", &filename);
-    let key_filename = format!("certs/{}.key", &filename);
+    let crt_filename = format!("{}/{}.crt", &out_dir, &filename);
+    let key_filename = format!("{}/{}.key", &out_dir, &filename);
+
+
 
     fs::write(crt_filename, pem).expect("Unable to write file!");
     fs::write(key_filename, key).expect("Unable to write file!");
@@ -196,7 +199,7 @@ pub fn gen_etcd_cert(worker: &Instance, ca_key: &PKey<Private>, ca_cert: &X509) 
     fs::write(key_filename, key).expect("Unable to write file!");
 }
 
-pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config) {
+pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config, out_dir: &str) {
     println!("Creating cert for Kubernetes API server");
 
     let mut api_client = CertificateParameters::default("kubernetes");
@@ -217,7 +220,7 @@ pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config) {
     api_client.ca_crt = Some(&ca_cert);
 
     match api_client.gen_cert() {
-        Ok(bundle) => write_bundle_to_file(&bundle, "apiserver"),
+        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "apiserver"),
         Err(error) => {
             eprintln!("{}", error);
             return
@@ -248,7 +251,7 @@ pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config) {
     // let bundle = api_client.gen_cert();
 
     match api_client.gen_cert() {
-        Ok(bundle) => write_bundle_to_file(&bundle, "apiserver-kubelet-client"),
+        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "apiserver-kubelet-client"),
         Err(error) => {
             eprintln!("{}", error);
             return
@@ -257,7 +260,7 @@ pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config) {
     println!("Create CA: front proxy");
     let (fp_ca_cert, fp_ca_key) = match gen_ca_cert("front-proxy-ca", Some((&ca_key, &ca_cert))) {
         Ok(bundle) => {
-            write_bundle_to_file(&bundle, "front-proxy-ca");
+            write_bundle_to_file(&bundle, &out_dir, "front-proxy-ca");
             bundle
         },
         Err(error) => {
@@ -286,12 +289,19 @@ pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config) {
         api_client.ca_crt = Some(&fp_ca_cert);
 
     match api_client.gen_cert() {
-        Ok(bundle) => write_bundle_to_file(&bundle, "front-proxy-client"),
+        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "front-proxy-client"),
         Err(error) => {
             eprintln!("{}", error);
             return
         }
     };
+
+    let rsa = Rsa::generate(2048).unwrap();
+    let key = rsa.private_key_to_pem().unwrap();
+    let pkey = PKey::from_rsa(rsa).unwrap().public_key_to_pem().unwrap();
+
+    fs::write("certs/sa.pub", pkey).expect("Unable to write file!");
+    fs::write("certs/sa.key", key).expect("Unable to write file!");
 }
 
 
