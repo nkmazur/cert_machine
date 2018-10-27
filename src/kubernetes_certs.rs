@@ -1,10 +1,11 @@
 use std::fs;
+use std::path::Path;
 use openssl::x509::X509;
 use openssl::pkey::Private;
 use openssl::pkey::PKey;
 use openssl::rsa::Rsa;
 use config_parser::{Config, Instance};
-use cert_machine::{CertificateParameters, Subject};
+use cert_machine::{CertificateParameters, Subject, Bundle};
 
 fn opt_str(opt_string: &Option<String>) -> Option<&str> {
     match opt_string {
@@ -13,21 +14,28 @@ fn opt_str(opt_string: &Option<String>) -> Option<&str> {
     }
 }
 
-pub fn write_bundle_to_file(bundle: &(X509, Vec<u8>), out_dir: &str, filename: &str) {
-    let (certificate, key) = bundle;
-
-    let pem = certificate.to_pem().unwrap();
-
+pub fn write_bundle_to_file(bundle: &Bundle, out_dir: &str, filename: &str) {
     let crt_filename = format!("{}/{}.crt", &out_dir, &filename);
     let key_filename = format!("{}/{}.key", &out_dir, &filename);
 
+    match Path::new(&crt_filename).exists() {
+        false => fs::write(&crt_filename, bundle.to_pem()).expect("Unable to write file!"),
+        true => {
+            eprintln!("File exists: {}!", crt_filename);
+            return
+        },
+    }
 
-
-    fs::write(crt_filename, pem).expect("Unable to write file!");
-    fs::write(key_filename, key).expect("Unable to write file!");
+    match Path::new(&key_filename).exists() {
+        false => fs::write(&key_filename, &bundle.key).expect("Unable to write file!"),
+        true => {
+            eprintln!("File exists: {}!", key_filename);
+            return
+        },
+    }
 }
 
-pub fn gen_main_ca_cert(config: &Config)  -> Result<(X509, Vec<u8>), &'static str> {
+pub fn gen_main_ca_cert(config: &Config)  -> Result<Box<Bundle>, &'static str> {
     let ca_cert = CertificateParameters {
         key_length: config.ca.key_size,
         serial_number: 1,
@@ -58,7 +66,15 @@ pub fn gen_main_ca_cert(config: &Config)  -> Result<(X509, Vec<u8>), &'static st
     ca_cert.gen_cert()
 }
 
-pub fn gen_ca_cert(cn: &str, main_ca: Option<(&PKey<Private>, &X509)>) -> Result<(X509, Vec<u8>), &'static str> {
+pub fn gen_ca_cert(cn: &str, main_ca: Option<&Box<Bundle>>) -> Result<Box<Bundle>, &'static str> {
+    let (ca_key, ca_crt) = match main_ca {
+        Some(bundle) => {
+            let key = bundle.private_key();
+            (Some(key), Some(bundle.cert.clone()))
+        },
+        None => (None, None)
+    };
+
     let mut ca_cert = CertificateParameters::default(&cn);
 
     ca_cert.key_usage = vec![
@@ -70,14 +86,15 @@ pub fn gen_ca_cert(cn: &str, main_ca: Option<(&PKey<Private>, &X509)>) -> Result
 
     ca_cert.basic_constraints = Some(vec!["ca"]);
 
-    if let Some(main_ca) = main_ca {
-        let (main_ca_key, main_ca_cert) = main_ca;
+    if let Some(_) = main_ca {
         ca_cert.is_self_signed = false;
-        ca_cert.ca_key = Some(&main_ca_key);
-        ca_cert.ca_crt = Some(&main_ca_cert);
     }
 
-    ca_cert.gen_cert()
+    ca_cert.ca_key = ca_key.as_ref();
+    ca_cert.ca_crt = ca_crt.as_ref();
+
+    let ca_certificate = ca_cert.gen_cert();
+    ca_certificate
 }
 
 pub fn gen_kubelet_cert(worker: &Instance, ca_key: &PKey<Private>, ca_cert: &X509) {
@@ -110,13 +127,6 @@ pub fn gen_kubelet_cert(worker: &Instance, ca_key: &PKey<Private>, ca_cert: &X50
         ],
         extended_key_usage: Some(vec!["server_auth"]),
         basic_constraints: None,
-        // san: Some(vec![
-        //     "kubernetes".to_owned(),
-        //     "kubernetes.default".to_owned(),
-        //     "kubernetes.default".to_owned(),
-        //     "kubernetes.default.svc.cluster.local".to_owned(),
-        //     "10.96.0.1".to_owned(),
-        // ]),
 
         san: Some(worker.san.iter().map(|s| s as &str).collect()),
         is_self_signed: false,
@@ -124,26 +134,44 @@ pub fn gen_kubelet_cert(worker: &Instance, ca_key: &PKey<Private>, ca_cert: &X50
         ca_crt: Some(&ca_cert),
     };
 
-    let result = cert.gen_cert();
+    match cert.gen_cert() {
+        Ok(ref bundle) => write_bundle_to_file(&bundle, "certs",  &cert_filename),
+        Err(err) => {
+            println!("{}", err);
+            return
+        },
+    }
+}
 
-        let (certificate, key) = match result {
-        Ok(result) => result,
+pub fn gen_etcd_cert(worker: &Instance, ca_key: &PKey<Private>, ca_cert: &X509) {
+    println!("Creating cert for Kubernetes ETCD client");
+
+    let mut api_client = CertificateParameters::default("kube-apiserver-etcd-client");
+
+    api_client.subject.organization = Some("system:masters");
+    api_client.key_usage = vec![
+            "digital_signature",
+            "key_encipherment",
+            "critical",
+    ];
+    api_client.extended_key_usage = Some(vec![
+        "client_auth",
+    ]);
+
+    api_client.is_self_signed = false;
+    api_client.ca_key = Some(&ca_key);
+    api_client.ca_crt = Some(&ca_cert);
+
+    match api_client.gen_cert() {
+        Ok(bundle) => write_bundle_to_file(&bundle, "certs", "apiserver-etcd-client"),
         Err(error) => {
             eprintln!("{}", error);
             return
         }
     };
 
-    let pem = certificate.to_pem().unwrap();
 
-    let crt_filename = format!("certs/{}.crt", cert_filename);
-    let key_filename = format!("certs/{}.key", cert_filename);
-
-    fs::write(crt_filename, pem).expect("Unable to write file!");
-    fs::write(key_filename, key).expect("Unable to write file!");
-}
-
-pub fn gen_etcd_cert(worker: &Instance, ca_key: &PKey<Private>, ca_cert: &X509) {
+    //-------------------------------------------------------
     println!("Creating cert for etcd node: {}", worker.hostname);
 
     let cert_filename = if let Some(ref filename) = worker.filename {
@@ -171,7 +199,7 @@ pub fn gen_etcd_cert(worker: &Instance, ca_key: &PKey<Private>, ca_cert: &X509) 
             "key_encipherment",
             "critical",
         ],
-        extended_key_usage: Some(vec!["server_auth"]),
+        extended_key_usage: Some(vec!["server_auth", "client_auth"]),
         basic_constraints: None,
 
         san: Some(worker.san.iter().map(|s| s as &str).collect()),
@@ -180,27 +208,28 @@ pub fn gen_etcd_cert(worker: &Instance, ca_key: &PKey<Private>, ca_cert: &X509) 
         ca_crt: Some(&ca_cert),
     };
 
-    let result = cert.gen_cert();
-
-    let (certificate, key) = match result {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!("{}", error);
+    match cert.gen_cert() {
+        Ok(ref bundle) => write_bundle_to_file(&bundle, "certs/etcd",  &cert_filename),
+        Err(err) => {
+            println!("{}", err);
             return
-        }
-    };
-
-    let pem = certificate.to_pem().unwrap();
-
-    let crt_filename = format!("certs/etcd/{}.crt", cert_filename);
-    let key_filename = format!("certs/etcd/{}.key", cert_filename);
-
-    fs::write(crt_filename, pem).expect("Unable to write file!");
-    fs::write(key_filename, key).expect("Unable to write file!");
+        },
+    }
 }
 
-pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config, out_dir: &str) {
+pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config, out_dir: &str, front_ca: &Bundle) {
     println!("Creating cert for Kubernetes API server");
+
+    let mut san: Vec<&str> = vec![
+        "kubernetes",
+        "kubernetes.default",
+        "kubernetes.default.svc",
+        "kubernetes.default.svc.cluster.local",
+        "10.96.0.1",
+    ];
+
+    let san_from_confg: Vec<&str> = config.master_san.iter().map(|s| s as &str).collect();
+    san.extend(san_from_confg);
 
     let mut api_client = CertificateParameters::default("kubernetes");
 
@@ -213,7 +242,7 @@ pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config, out_d
         "server_auth",
     ]);
 
-    api_client.san = Some(config.master_san.iter().map(|s| s as &str).collect());
+    api_client.san = Some(san.iter().map(|s| s as &str).collect());
 
     api_client.is_self_signed = false;
     api_client.ca_key = Some(&ca_key);
@@ -242,13 +271,9 @@ pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config, out_d
         "client_auth",
     ]);
 
-    api_client.san = Some(config.master_san.iter().map(|s| s as &str).collect());
-
     api_client.is_self_signed = false;
     api_client.ca_key = Some(&ca_key);
     api_client.ca_crt = Some(&ca_cert);
-
-    // let bundle = api_client.gen_cert();
 
     match api_client.gen_cert() {
         Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "apiserver-kubelet-client"),
@@ -257,21 +282,10 @@ pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config, out_d
             return
         }
     };
-    println!("Create CA: front proxy");
-    let (fp_ca_cert, fp_ca_key) = match gen_ca_cert("front-proxy-ca", Some((&ca_key, &ca_cert))) {
-        Ok(bundle) => {
-            write_bundle_to_file(&bundle, &out_dir, "front-proxy-ca");
-            bundle
-        },
-        Err(error) => {
-            eprintln!("{}", error);
-            return
-        }
-    };
-
-    let fp_ca_key = PKey::private_key_from_pem(&fp_ca_key).unwrap();
 
     println!("Creating cert: front-proxy-client");
+
+    let front_key = front_ca.private_key();
 
     let mut api_client = CertificateParameters::default("front-proxy-client");
 
@@ -285,8 +299,8 @@ pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config, out_d
     ]);
 
         api_client.is_self_signed = false;
-        api_client.ca_key = Some(&fp_ca_key);
-        api_client.ca_crt = Some(&fp_ca_cert);
+        api_client.ca_key = Some(&front_key);
+        api_client.ca_crt = Some(&front_ca.cert);
 
     match api_client.gen_cert() {
         Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "front-proxy-client"),
@@ -303,11 +317,3 @@ pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config, out_d
     fs::write("certs/sa.pub", pkey).expect("Unable to write file!");
     fs::write("certs/sa.key", key).expect("Unable to write file!");
 }
-
-
-    //     CommonName                         Organization
-    // let v: Vec<(&str, &str)> = vec![
-    // ("system:kube-controller-manager", "system:kube-controller-manager"),
-    // ("system:kube-proxy" ,"system:node-proxier"),
-    // ("system:kube-scheduler" ,"system:kube-scheduler"),
-    // ("service-accounts" ,"Kubernetes,")];

@@ -6,6 +6,7 @@ use openssl::asn1::Asn1Time;
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
+use openssl::pkey::Private;
 use openssl::rsa::Rsa;
 use openssl::bn::BigNum;
 use openssl::x509::extension::ExtendedKeyUsage;
@@ -14,6 +15,21 @@ use openssl::x509::extension::SubjectAlternativeName;
 use openssl::x509::extension::BasicConstraints;
 use openssl::x509::X509Extension;
 use openssl::x509::{X509Name, X509};
+
+pub struct Bundle {
+    pub cert: X509,
+    pub key: Vec<u8>,
+}
+
+impl Bundle {
+    pub fn private_key(&self) -> PKey<Private> {
+        PKey::private_key_from_pem(&self.key).expect("Error parsing private key!")
+    }
+
+    pub fn to_pem(&self) -> Vec<u8> {
+        self.cert.to_pem().expect("Unable to convert cert to X509!")
+    }
+}
 
 pub struct CertificateParameters<'a> {
     pub key_length: u32,
@@ -40,7 +56,7 @@ pub struct Subject<'a> {
 
 impl<'a> CertificateParameters<'a> {
     pub fn default(cn: &str) -> CertificateParameters {
-        let cert = CertificateParameters {
+        CertificateParameters {
             key_length: 2048,
             serial_number: 0, //?
             validity_days: 100, //?
@@ -59,11 +75,10 @@ impl<'a> CertificateParameters<'a> {
             is_self_signed: true,
             ca_key: None,
             ca_crt: None,
-        };
-        cert
+        }
     }
 
-    pub fn gen_cert(&self) -> Result<(X509, Vec<u8>), &'static str> {
+    pub fn gen_cert(&self) -> Result<Box<Bundle>, &'static str> {
         //Generate new key for cert
         let rsa = Rsa::generate(self.key_length).unwrap();
         let key = rsa.private_key_to_pem().unwrap();
@@ -172,7 +187,6 @@ impl<'a> CertificateParameters<'a> {
             for constraint in constraints.iter() {
                 match constraint.as_ref() {
                     "ca" => bc.ca(),
-                    // "critical" => bc.critical(),
                     _ => &bc,
                 };
             }
@@ -184,7 +198,7 @@ impl<'a> CertificateParameters<'a> {
         if self.is_self_signed != true {
             if let Some(ca_cert) = self.ca_crt {
                 let ca_subject = ca_cert.subject_name();
-                builder.set_issuer_name(ca_subject).unwrap();
+                builder.set_issuer_name(&ca_subject).unwrap();
             }
 
             if let Some(ca_key) = self.ca_key {
@@ -195,9 +209,15 @@ impl<'a> CertificateParameters<'a> {
             builder.set_issuer_name(&name).unwrap();
         }
 
-        let certificate: X509 = builder.build();
+        let cert: X509 = builder.build();
 
-        Ok((certificate, key))
+        let bundle = Box::new(
+            Bundle{
+                cert,
+                key,
+        });
+
+        Ok(bundle)
     }
 }
 
