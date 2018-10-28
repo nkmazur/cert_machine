@@ -283,6 +283,111 @@ pub fn kube_certs(ca_key: &PKey<Private>, ca_cert: &X509, config: &Config, out_d
         }
     };
 
+    println!("Creating cert for Kubernetes admin");
+
+    let mut api_client = CertificateParameters::default("admin");
+
+    api_client.subject.organization = Some("system:masters");
+    api_client.key_usage = vec![
+            "digital_signature",
+            "key_encipherment",
+            "critical",
+    ];
+    api_client.extended_key_usage = Some(vec![
+        "client_auth",
+    ]);
+
+    api_client.is_self_signed = false;
+    api_client.ca_key = Some(&ca_key);
+    api_client.ca_crt = Some(&ca_cert);
+
+    match api_client.gen_cert() {
+        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "admin"),
+        Err(error) => {
+            eprintln!("{}", error);
+            return
+        }
+    };
+
+    println!("Creating cert for Kubernetes controller-manager");
+
+    let mut api_client = CertificateParameters::default("system:kube-controller-manager");
+
+    api_client.subject.organization = Some("system:masters");
+    api_client.key_usage = vec![
+            "digital_signature",
+            "key_encipherment",
+            "critical",
+    ];
+    api_client.extended_key_usage = Some(vec![
+        "client_auth",
+    ]);
+
+    api_client.is_self_signed = false;
+    api_client.ca_key = Some(&ca_key);
+    api_client.ca_crt = Some(&ca_cert);
+
+    match api_client.gen_cert() {
+        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "kube-controller-manager"),
+        Err(error) => {
+            eprintln!("{}", error);
+            return
+        }
+    };
+
+    println!("Creating cert for Kubernetes scheduler");
+
+    let mut api_client = CertificateParameters::default("system:kube-scheduler");
+
+    api_client.subject.organization = Some("system:masters");
+    api_client.key_usage = vec![
+            "digital_signature",
+            "key_encipherment",
+            "critical",
+    ];
+    api_client.extended_key_usage = Some(vec![
+        "client_auth",
+    ]);
+
+    api_client.is_self_signed = false;
+    api_client.ca_key = Some(&ca_key);
+    api_client.ca_crt = Some(&ca_cert);
+
+    match api_client.gen_cert() {
+        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "kube-scheduler"),
+        Err(error) => {
+            eprintln!("{}", error);
+            return
+        }
+    };
+
+    println!("Creating cert for Kubernetes proxy");
+
+    let mut api_client = CertificateParameters::default("system:kube-proxy");
+
+    api_client.subject.organization = Some("system:node-proxier");
+    api_client.key_usage = vec![
+            "digital_signature",
+            "key_encipherment",
+            "critical",
+    ];
+    api_client.extended_key_usage = Some(vec![
+        "client_auth",
+        "server_auth",
+    ]);
+
+    api_client.is_self_signed = false;
+    api_client.ca_key = Some(&ca_key);
+    api_client.ca_crt = Some(&ca_cert);
+
+    match api_client.gen_cert() {
+        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "kube-proxy"),
+        Err(error) => {
+            eprintln!("{}", error);
+            return
+        }
+    };
+
     println!("Creating cert: front-proxy-client");
 
     let front_key = front_ca.private_key();
