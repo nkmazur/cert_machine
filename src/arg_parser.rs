@@ -3,11 +3,11 @@ pub struct CommandOptions {
     #[options(help = "print help message")]
     help: bool,
     #[options(help = "be verbose")]
-    verbose: bool,
+    pub verbose: bool,
     #[options(help = "overwrites file if exists")]
-    overwrite: bool,
+    pub overwrite: bool,
     #[options(command)]
-    command: Option<Command>,
+    pub command: Option<Command>,
 }
 
 #[derive(Debug, Options)]
@@ -25,7 +25,7 @@ pub struct NewOpts {
     #[options(help = "print help message")]
     help: bool,
     #[options(help = "set cluster name")]
-    cluster_name: Option<String>,
+    pub cluster_name: Option<String>,
 }
 
 #[derive(Debug, Options)]
@@ -33,9 +33,9 @@ pub struct InitOpts {
     #[options(help = "print help message")]
     help: bool,
     #[options(help = "target directory")]
-    dir: Option<String>,
+    pub dir: Option<String>,
     #[options(help = "overwrites file if exists")]
-    overwrite: bool,
+    pub overwrite: bool,
 }
 
 #[derive(Debug, Options)]
@@ -43,5 +43,5 @@ pub struct GenOpts {
     #[options(help = "print help message")]
     help: bool,
     #[options(help = "target directory")]
-    dir: Option<String>,
+    pub dir: Option<String>,
 }

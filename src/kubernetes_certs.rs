@@ -125,7 +125,7 @@ pub fn gen_kubelet_cert(worker: &Instance, ca_key: &PKey<Private>, ca_cert: &X50
             "key_encipherment",
             "critical",
         ],
-        extended_key_usage: Some(vec!["server_auth"]),
+        extended_key_usage: Some(vec!["client_auth"]),
         basic_constraints: None,
 
         san: Some(worker.san.iter().map(|s| s as &str).collect()),

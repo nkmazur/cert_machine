@@ -13,7 +13,7 @@ use kubernetes_certs::gen_main_ca_cert;
 use cert_machine::Bundle;
 use kubernetes_certs::gen_ca_cert;
 use kubernetes_certs::write_bundle_to_file;
-// use arg_parser::CommandOptions;
+use arg_parser::{CommandOptions, Command};
 use config_parser::Config;
 use gumdrop::Options;
 // use openssl::pkey::PKey;
@@ -24,6 +24,16 @@ struct CA {
     main_ca: Box<Bundle>,
     etcd_ca: Box<Bundle>,
     front_ca: Box<Bundle>,
+}
+
+impl CA {
+    fn read_from_fs(dir: &str) -> CA {
+        CA {
+            main_ca: Bundle::read_from_fs(&dir, "ca").unwrap(),
+            etcd_ca: Bundle::read_from_fs(&dir, "etcd/etcd-ca").unwrap(),
+            front_ca: Bundle::read_from_fs(&dir, "front-proxy-ca").unwrap(),
+        }
+    }
 }
 
 fn create_ca(config: &Config, out_dir: &str) -> Result<CA, &'static str> {
@@ -63,9 +73,9 @@ fn create_ca(config: &Config, out_dir: &str) -> Result<CA, &'static str> {
 }
 
 fn main() {
-    // let opts = CommandOptions::parse_args_default_or_exit();
+    let opts = CommandOptions::parse_args_default_or_exit();
 
-    // println!("{:#?}",opts);
+    println!("{:#?}",opts);
 
     let config = Config::new("config.toml");
     let out_dir = "certs".to_owned();
@@ -80,28 +90,58 @@ fn main() {
         }
     }
 
-    let ca = match create_ca(&config, &out_dir) {
-        Ok(ca) => ca,
-        Err(err) => {
-            panic!("Error when creating certificate authority: {}", err);
+    match opts.command {
+        Some(Command::New(_)) => {
+            let ca = match create_ca(&config, &out_dir) {
+                Ok(ca) => ca,
+                Err(err) => {
+                    panic!("Error when creating certificate authority: {}", err);
 
+                },
+            };
+
+            for instance in config.worker.iter() {
+                kubernetes_certs::gen_kubelet_cert(&instance, &ca.main_ca.private_key(), &ca.main_ca.cert);
+            }
+
+            for instance in config.etcd_server.iter() {
+                kubernetes_certs::gen_etcd_cert(&instance, &ca.etcd_ca.private_key(), &ca.etcd_ca.cert);
+            }
+
+            kubernetes_certs::kube_certs(&ca.main_ca.private_key(), &ca.main_ca.cert, &config, &out_dir, &ca.front_ca);
         },
-    };
+        Some(Command::InitCa(_)) => {
+            match create_ca(&config, &out_dir) {
+                Ok(ca) => ca,
+                Err(err) => {
+                    panic!("Error when creating certificate authority: {}", err);
 
-    for instance in config.worker.iter() {
-        kubernetes_certs::gen_kubelet_cert(&instance, &ca.main_ca.private_key(), &ca.main_ca.cert);
+                },
+            };
+        },
+        Some(Command::GenCerts(_)) => {
+            let ca = CA::read_from_fs("certs");
+
+            for instance in config.worker.iter() {
+                kubernetes_certs::gen_kubelet_cert(&instance, &ca.main_ca.private_key(), &ca.main_ca.cert);
+            }
+
+            for instance in config.etcd_server.iter() {
+                kubernetes_certs::gen_etcd_cert(&instance, &ca.etcd_ca.private_key(), &ca.etcd_ca.cert);
+            }
+
+            kubernetes_certs::kube_certs(&ca.main_ca.private_key(), &ca.main_ca.cert, &config, &out_dir, &ca.front_ca);
+        },
+        None => (),
     }
 
-    for instance in config.etcd_server.iter() {
-        kubernetes_certs::gen_etcd_cert(&instance, &ca.etcd_ca.private_key(), &ca.etcd_ca.cert);
+    println!("Creating output dirs.");
+    let etcd_dir = format!("{}/etcd", out_dir);
+    match fs::create_dir_all(etcd_dir) {
+        Ok(_) => (),
+        Err(e) => {
+            eprintln!("Error when creating dir: {:#?}", e);
+            exit(1);
+        }
     }
-
-    kubernetes_certs::kube_certs(&ca.main_ca.private_key(), &ca.main_ca.cert, &config, &out_dir, &ca.front_ca);
 }
-
-
-//    let ca_key_file = fs::read("certs/ca.key").expect("Unable to open ca.key");
-//    let ca_key = PKey::private_key_from_pem(&ca_key_file).expect("Unable to parse ca.key");
-//
-//    let ca_cert_file = fs::read("certs/ca.crt").expect("Unable to open ca.crt");
-//    let ca_cert = X509::from_pem(&ca_cert_file).expect("Unable to parse ca.crt");

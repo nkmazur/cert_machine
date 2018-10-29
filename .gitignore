@@ -2,5 +2,5 @@
 **/*.rs.bk
 **/*.crt
 **/*.key
-/certs
-config.toml
+/certs*
+/config.toml

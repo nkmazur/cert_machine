@@ -1,5 +1,7 @@
 extern crate openssl;
 
+use std::fs;
+use std::io;
 use openssl::asn1::Asn1Time;
 // use openssl::conf::Conf;
 // use openssl::conf::ConfMethod;
@@ -28,6 +30,21 @@ impl Bundle {
 
     pub fn to_pem(&self) -> Vec<u8> {
         self.cert.to_pem().expect("Unable to convert cert to X509!")
+    }
+
+    pub fn read_from_fs(dir: &str, filename: &str) -> Result<Box<Bundle>, io::Error> {
+        let key_filename = format!("{}/{}.key", &dir, &filename);
+        let crt_filename = format!("{}/{}.crt", &dir, &filename);
+
+        let key_file = fs::read(&key_filename)?;
+        let cert_file = fs::read(&crt_filename)?;
+
+        // let ca_key = Rsa::private_key_from_pem(&key_file).expect("Unable to parse ca.key");
+        let ca_cert = X509::from_pem(&cert_file).expect("Unable to parse ca.crt");
+        Ok(Box::new(Bundle {
+            cert: ca_cert,
+            key: key_file,
+        }))
     }
 }
 
@@ -124,7 +141,14 @@ impl<'a> CertificateParameters<'a> {
                     _ => &eku,
                 };
             }
-            let extended_usage: X509Extension = eku.build().unwrap();
+            // let extended_usage: X509Extension = eku.build().unwrap();
+            let extended_usage = match eku.build() {
+                Ok(ex) => ex,
+                Err(err) => {
+                    println!("Error when build extended key usage:\n{}", err.to_string());
+                    return Err("Error!");
+                }
+            };
             builder.append_extension(extended_usage).unwrap();
         }
 
