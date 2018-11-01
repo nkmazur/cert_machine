@@ -16,7 +16,6 @@ use kubernetes_certs::write_bundle_to_file;
 use arg_parser::{CommandOptions, Command};
 use config_parser::Config;
 use gumdrop::Options;
-// use openssl::pkey::PKey;
 use std::process::exit;
 use std::fs;
 
@@ -47,7 +46,7 @@ fn create_ca(config: &Config, out_dir: &str) -> Result<CA, &'static str> {
     };
 
     println!("Create CA: etcd");
-    let etcd_ca = match gen_ca_cert("etcd", Some(&main_ca)) {
+    let etcd_ca = match gen_ca_cert("etcd", Some(&main_ca), &config) {
         Ok(bundle) => {
             write_bundle_to_file(&bundle,  &out_dir,"etcd/etcd-ca");
             bundle
@@ -57,7 +56,7 @@ fn create_ca(config: &Config, out_dir: &str) -> Result<CA, &'static str> {
     };
 
     println!("Create CA: front proxy");
-    let front_ca = match gen_ca_cert("front-proxy-ca", Some(&main_ca)) {
+    let front_ca = match gen_ca_cert("front-proxy-ca", Some(&main_ca), &config) {
         Ok(bundle) => {
             write_bundle_to_file(&bundle, &out_dir, "front-proxy-ca");
             bundle
@@ -74,8 +73,6 @@ fn create_ca(config: &Config, out_dir: &str) -> Result<CA, &'static str> {
 
 fn main() {
     let opts = CommandOptions::parse_args_default_or_exit();
-
-    println!("{:#?}",opts);
 
     let config = Config::new("config.toml");
     let out_dir = "certs".to_owned();
@@ -96,16 +93,15 @@ fn main() {
                 Ok(ca) => ca,
                 Err(err) => {
                     panic!("Error when creating certificate authority: {}", err);
-
                 },
             };
 
             for instance in config.worker.iter() {
-                kubernetes_certs::gen_kubelet_cert(&instance, &ca.main_ca.private_key(), &ca.main_ca.cert);
+                kubernetes_certs::gen_kubelet_cert(&instance, &ca.main_ca.private_key(), &ca.main_ca.cert, &config);
             }
 
             for instance in config.etcd_server.iter() {
-                kubernetes_certs::gen_etcd_cert(&instance, &ca.etcd_ca.private_key(), &ca.etcd_ca.cert);
+                kubernetes_certs::gen_etcd_cert(&instance, &ca.etcd_ca.private_key(), &ca.etcd_ca.cert, &config);
             }
 
             kubernetes_certs::kube_certs(&ca.main_ca.private_key(), &ca.main_ca.cert, &config, &out_dir, &ca.front_ca);
@@ -123,11 +119,11 @@ fn main() {
             let ca = CA::read_from_fs("certs");
 
             for instance in config.worker.iter() {
-                kubernetes_certs::gen_kubelet_cert(&instance, &ca.main_ca.private_key(), &ca.main_ca.cert);
+                kubernetes_certs::gen_kubelet_cert(&instance, &ca.main_ca.private_key(), &ca.main_ca.cert, &config);
             }
 
             for instance in config.etcd_server.iter() {
-                kubernetes_certs::gen_etcd_cert(&instance, &ca.etcd_ca.private_key(), &ca.etcd_ca.cert);
+                kubernetes_certs::gen_etcd_cert(&instance, &ca.etcd_ca.private_key(), &ca.etcd_ca.cert, &config);
             }
 
             kubernetes_certs::kube_certs(&ca.main_ca.private_key(), &ca.main_ca.cert, &config, &out_dir, &ca.front_ca);

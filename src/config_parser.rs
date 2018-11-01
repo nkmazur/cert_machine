@@ -3,19 +3,17 @@ extern crate toml;
 use std::fs::File;
 use std::io::prelude::*;
 
-#[derive(Debug)]
 #[derive(Deserialize)]
 pub struct Config {
     pub cluster_name: String,
     pub worker: Vec<Instance>,
     pub etcd_server: Vec<Instance>,
-    pub validity_days: usize,
-    pub key_size: u32,
+    pub validity_days: Option<u32>,
+    pub key_size: Option<u32>,
     pub ca: Ca,
     pub master_san: Vec<String>
 }
 
-#[derive(Debug)]
 #[derive(Deserialize)]
 pub struct Instance {
     pub filename: Option<String>,
@@ -23,7 +21,6 @@ pub struct Instance {
     pub san: Vec<String>,
 }
 
-#[derive(Debug)]
 #[derive(Deserialize)]
 pub struct Ca {
     pub country: Option<String>,

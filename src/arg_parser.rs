@@ -1,4 +1,4 @@
-#[derive(Debug, Options)]
+#[derive(Options)]
 pub struct CommandOptions {
     #[options(help = "print help message")]
     help: bool,
@@ -10,7 +10,7 @@ pub struct CommandOptions {
     pub command: Option<Command>,
 }
 
-#[derive(Debug, Options)]
+#[derive(Options)]
 pub enum Command {
     #[options(help = "Create new CA and generate certs")]
     New(NewOpts),
@@ -20,7 +20,7 @@ pub enum Command {
     GenCerts(GenOpts),
 }
 
-#[derive(Debug, Options)]
+#[derive(Options)]
 pub struct NewOpts {
     #[options(help = "print help message")]
     help: bool,
@@ -28,7 +28,7 @@ pub struct NewOpts {
     pub cluster_name: Option<String>,
 }
 
-#[derive(Debug, Options)]
+#[derive(Options)]
 pub struct InitOpts {
     #[options(help = "print help message")]
     help: bool,
@@ -38,7 +38,7 @@ pub struct InitOpts {
     pub overwrite: bool,
 }
 
-#[derive(Debug, Options)]
+#[derive(Options)]
 pub struct GenOpts {
     #[options(help = "print help message")]
     help: bool,
