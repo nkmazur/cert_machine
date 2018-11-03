@@ -36,7 +36,7 @@ impl CA {
 }
 
 fn create_ca(config: &Config, out_dir: &str) -> Result<CA, &'static str> {
-    println!("Create CA: ROOT");
+    println!("Creating CA with name: {}", config.cluster_name);
     let main_ca = match gen_main_ca_cert(&config) {
         Ok(bundle) => {
             write_bundle_to_file(&bundle, &out_dir, "ca");
@@ -48,7 +48,7 @@ fn create_ca(config: &Config, out_dir: &str) -> Result<CA, &'static str> {
     println!("Create CA: etcd");
     let etcd_ca = match gen_ca_cert("etcd", Some(&main_ca), &config) {
         Ok(bundle) => {
-            write_bundle_to_file(&bundle,  &out_dir,"etcd/etcd-ca");
+            write_bundle_to_file(&bundle, &out_dir,"etcd/etcd-ca");
             bundle
         },
         Err(error) => return Err(error),

@@ -59,12 +59,11 @@ pub fn gen_main_ca_cert(config: &Config)  -> Result<Box<Bundle>, &'static str> {
         ca: None,
     };
 
-    println!("Creating CA with name: {}", config.cluster_name);
     ca_cert.gen_cert()
 }
 
 pub fn gen_ca_cert(cn: &str, main_ca: Option<&Box<Bundle>>, config: &Config) -> Result<Box<Bundle>, &'static str> {
-let mut ca_cert = CertificateParameters::default(&cn);
+    let mut ca_cert = CertificateParameters::default(&cn);
 
     ca_cert.ca = main_ca;
     ca_cert.key_usage = vec![
@@ -124,30 +123,6 @@ pub fn gen_kubelet_cert(worker: &Instance, ca: Option<&Box<Bundle>>, config: &Co
 }
 
 pub fn gen_etcd_cert(worker: &Instance, ca: Option<&Box<Bundle>>, config: &Config) {
-    println!("Creating cert for Kubernetes ETCD client");
-
-    let mut api_client = CertificateParameters::client("kube-apiserver-etcd-client");
-
-    api_client.subject.organization = Some("system:masters");
-
-    api_client.ca = ca;
-
-    if let Some(size) = config.key_size {
-        api_client.key_length = size;
-    }
-
-    if let Some(validity) = config.validity_days {
-        api_client.validity_days = validity;
-    }
-
-    match api_client.gen_cert() {
-        Ok(bundle) => write_bundle_to_file(&bundle, "certs", "apiserver-etcd-client"),
-        Err(error) => {
-            eprintln!("{}", error);
-            return
-        }
-    };
-
     println!("Creating cert for etcd node: {}", worker.hostname);
 
     let cert_filename = if let Some(ref filename) = worker.filename {
@@ -230,6 +205,28 @@ pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
 
     match api_client.gen_cert() {
         Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "apiserver-kubelet-client"),
+        Err(error) => {
+            eprintln!("{}", error);
+            return
+        }
+    };
+
+    println!("Creating cert for Kubernetes ETCD client");
+
+    let mut api_client = CertificateParameters::client("kube-apiserver-etcd-client");
+    api_client.subject.organization = Some("system:masters");
+    api_client.ca = Some(&ca.etcd_ca);
+
+    if let Some(size) = config.key_size {
+        api_client.key_length = size;
+    }
+
+    if let Some(validity) = config.validity_days {
+        api_client.validity_days = validity;
+    }
+
+    match api_client.gen_cert() {
+        Ok(bundle) => write_bundle_to_file(&bundle, "certs", "apiserver-etcd-client"),
         Err(error) => {
             eprintln!("{}", error);
             return
