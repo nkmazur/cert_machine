@@ -57,9 +57,7 @@ pub struct CertificateParameters<'a> {
     pub extended_key_usage: Option<Vec<&'a str>>,
     pub basic_constraints: Option<Vec<&'a str>>,
     pub san: Option<Vec<&'a str>>,
-    pub is_self_signed: bool,
-    pub ca_key: Option<&'a openssl::pkey::PKey<openssl::pkey::Private>>,
-    pub ca_crt: Option<&'a openssl::x509::X509>,
+    pub ca: Option<&'a Box<Bundle>>,
 }
 
 pub struct Subject<'a> {
@@ -75,8 +73,8 @@ impl<'a> CertificateParameters<'a> {
     pub fn default(cn: &str) -> CertificateParameters {
         CertificateParameters {
             key_length: 2048,
-            serial_number: 0, //?
-            validity_days: 100, //?
+            serial_number: 0,
+            validity_days: 100,
             subject: Subject {
                 common_name: &cn,
                 country: None,
@@ -89,9 +87,61 @@ impl<'a> CertificateParameters<'a> {
             extended_key_usage: None,
             basic_constraints: None,
             san: None,
-            is_self_signed: true,
-            ca_key: None,
-            ca_crt: None,
+            ca: None,
+        }
+    }
+
+    pub fn client(cn: &str) -> CertificateParameters {
+        CertificateParameters {
+            key_length: 2048,
+            serial_number: 0,
+            validity_days: 100,
+            subject: Subject {
+                common_name: &cn,
+                country: None,
+                organization: None,
+                organization_unit: None,
+                state_or_province_name: None,
+                locality: None,
+            },
+            key_usage: vec![
+                "digital_signature",
+                "key_encipherment",
+                "critical",
+            ],
+            extended_key_usage: Some(vec![
+                "client_auth",
+            ]),
+            basic_constraints: None,
+            san: None,
+            ca: None,
+        }
+    }
+
+    pub fn server(cn: &str) -> CertificateParameters {
+        CertificateParameters {
+            key_length: 2048,
+            serial_number: 0,
+            validity_days: 100,
+            subject: Subject {
+                common_name: &cn,
+                country: None,
+                organization: None,
+                organization_unit: None,
+                state_or_province_name: None,
+                locality: None,
+            },
+            key_usage: vec![
+                "digital_signature",
+                "key_encipherment",
+                "critical",
+            ],
+            extended_key_usage: Some(vec![
+                "server_auth",
+            ]),
+            basic_constraints: None,
+            san: None,
+            ca: None,
         }
     }
 
@@ -219,15 +269,9 @@ impl<'a> CertificateParameters<'a> {
         }
 
         // Sign cert if it not self signed
-        if self.is_self_signed != true {
-            if let Some(ca_cert) = self.ca_crt {
-                let ca_subject = ca_cert.subject_name();
-                builder.set_issuer_name(&ca_subject).unwrap();
-            }
-
-            if let Some(ca_key) = self.ca_key {
-                builder.sign(&ca_key, MessageDigest::sha256()).unwrap();
-            }
+        if let Some(ref ca) = self.ca {
+            builder.set_issuer_name(&ca.cert.subject_name()).unwrap();
+            builder.sign(&ca.private_key(), MessageDigest::sha256()).unwrap();
         } else {
             builder.sign(&pkey, MessageDigest::sha256()).unwrap();
             builder.set_issuer_name(&name).unwrap();

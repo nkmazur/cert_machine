@@ -19,10 +19,10 @@ use gumdrop::Options;
 use std::process::exit;
 use std::fs;
 
-struct CA {
-    main_ca: Box<Bundle>,
-    etcd_ca: Box<Bundle>,
-    front_ca: Box<Bundle>,
+pub struct CA {
+    pub main_ca: Box<Bundle>,
+    pub etcd_ca: Box<Bundle>,
+    pub front_ca: Box<Bundle>,
 }
 
 impl CA {
@@ -97,14 +97,14 @@ fn main() {
             };
 
             for instance in config.worker.iter() {
-                kubernetes_certs::gen_kubelet_cert(&instance, &ca.main_ca.private_key(), &ca.main_ca.cert, &config);
+                kubernetes_certs::gen_kubelet_cert(&instance, Some(&ca.main_ca), &config);
             }
 
             for instance in config.etcd_server.iter() {
-                kubernetes_certs::gen_etcd_cert(&instance, &ca.etcd_ca.private_key(), &ca.etcd_ca.cert, &config);
+                kubernetes_certs::gen_etcd_cert(&instance, Some(&ca.main_ca), &config);
             }
 
-            kubernetes_certs::kube_certs(&ca.main_ca.private_key(), &ca.main_ca.cert, &config, &out_dir, &ca.front_ca);
+            kubernetes_certs::kube_certs(&ca, &config, &out_dir);
         },
         Some(Command::InitCa(_)) => {
             match create_ca(&config, &out_dir) {
@@ -119,14 +119,14 @@ fn main() {
             let ca = CA::read_from_fs("certs");
 
             for instance in config.worker.iter() {
-                kubernetes_certs::gen_kubelet_cert(&instance, &ca.main_ca.private_key(), &ca.main_ca.cert, &config);
+                kubernetes_certs::gen_kubelet_cert(&instance, Some(&ca.main_ca), &config);
             }
 
             for instance in config.etcd_server.iter() {
-                kubernetes_certs::gen_etcd_cert(&instance, &ca.etcd_ca.private_key(), &ca.etcd_ca.cert, &config);
+                kubernetes_certs::gen_etcd_cert(&instance, Some(&ca.etcd_ca), &config);
             }
 
-            kubernetes_certs::kube_certs(&ca.main_ca.private_key(), &ca.main_ca.cert, &config, &out_dir, &ca.front_ca);
+            kubernetes_certs::kube_certs(&ca, &config, &out_dir);
         },
         None => (),
     }
