@@ -8,10 +8,15 @@ pub struct Config {
     pub cluster_name: String,
     pub worker: Vec<Instance>,
     pub etcd_server: Vec<Instance>,
-    pub validity_days: Option<u32>,
-    pub key_size: Option<u32>,
+    pub validity_days: u32,
+    #[serde(default = "cert_key_size")]
+    pub key_size: u32,
     pub ca: Ca,
-    pub master_san: Vec<String>
+    pub master_san: Vec<String>,
+    #[serde(default = "overwrite_false")]
+    pub overwrite: bool,
+    #[serde(default = "out_dir")]
+    pub out_dir: String,
 }
 
 #[derive(Deserialize)]
@@ -29,6 +34,7 @@ pub struct Ca {
     pub locality: Option<String>,
     pub state_or_province_name:Option<String>,
     pub validity_days: u32,
+    #[serde(default = "ca_key_size")]
     pub key_size: u32,
 }
 
@@ -43,4 +49,20 @@ impl Config {
 
         Box::new(config)
     }
+}
+
+fn cert_key_size() -> u32 {
+    2048
+}
+
+fn ca_key_size() -> u32 {
+    4096
+}
+
+fn overwrite_false() -> bool {
+    false
+}
+
+fn out_dir() -> String {
+    "certs".to_owned()
 }
