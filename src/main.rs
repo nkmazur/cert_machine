@@ -99,26 +99,35 @@ fn create_ca(config: &Config, out_dir: &str) -> Result<CA, &'static str> {
     })
 }
 
-fn create_symlink(source: &str, dest: &str) {
-	if let Err(_) =  symlink(&source, &dest) {
-		match fs::symlink_metadata(&dest) {
-			Ok(ref metadata) => {
-				match metadata.file_type().is_symlink() {
-					true => {
-						fs::remove_file(&dest).unwrap();
-						symlink(&source, &dest).unwrap();
-					},
-					false => {
-						eprintln!("Unable to create symlink. \"{}\" exists and not a symlink!", &dest);
-						exit(1);
-					},
-				}
-			},
-			Err(err) => {
-				panic!("Enable to create symlink: {}", err);
-			},
-		}
-	}
+fn create_symlink(ca_dir: &str, cert_name: &str, dest: &str) {
+    let types = vec![("key", "keys"), ("crt", "certs")];
+    for postfix in types.iter() {
+        let source_filename = format!("{}/{}/{}.{}", &ca_dir, &postfix.1, &cert_name, &postfix.0);
+        let dest_filename = format!("{}.{}", &dest, &postfix.0);
+
+        println!("Source filename: {}", &source_filename);
+        println!("Destination filename: {}", &dest_filename);
+
+        if let Err(_) =  symlink(&source_filename, &dest_filename) {
+            match fs::symlink_metadata(&dest_filename) {
+                Ok(ref metadata) => {
+                    match metadata.file_type().is_symlink() {
+                        true => {
+                            fs::remove_file(&dest_filename).unwrap();
+                            symlink(&source_filename, &dest_filename).unwrap();
+                        },
+                        false => {
+                            eprintln!("Unable to create symlink. \"{}\" exists and not a symlink!", &dest_filename);
+                            exit(1);
+                        },
+                    }
+                },
+                Err(err) => {
+                    panic!("Enable to create symlink: {}", err);
+                },
+            }
+        }
+    }
 }
 
 
@@ -161,23 +170,16 @@ fn main() {
                             Ok(_) => (),
                             Err(err) => panic!("Error, when writing cert: {}", err),
                         }
-                        let cn = &bundle.cert.serial_number().to_bn().unwrap();
-                        let cert_path = format!("../CA/root/certs/{}-{}.crt", &cert_filename, cn);
-                        let key_path = format!("../CA/root/keys/{}-{}.key", &cert_filename, cn);
-                        let node_cert_path = format!("{}/{}/node.crt", &out_dir, &cert_filename);
-                        let node_key_path = format!("{}/{}/node.key", &out_dir, &cert_filename);
-                        create_symlink(&cert_path, &node_cert_path);
-                        create_symlink(&key_path, &node_key_path);
+                        let sn = &bundle.cert.serial_number().to_bn().unwrap();
+                        let cert_name = format!("{}-{}", &cert_filename, sn);
+                        let node_cert_path = format!("{}/{}/node", &out_dir, &cert_filename);
+                        create_symlink("../CA/root", &cert_name, &node_cert_path);
                     },
                     Err(err) => panic!("Error when generate kubelet cert: {}", err),
                 }
                 match kubernetes_certs::gen_kubelet_cert(&instance, Some(&ca.main_ca), &config) {
                     Ok(bundle) => {
-                        let cn = &bundle.cert.serial_number().to_bn().unwrap();
-                        let cert_path = format!("../CA/root/certs/{}-kubeconfig-{}.crt", &cert_filename, cn);
-                        let key_path = format!("../CA/root/keys/{}-kubeconfig-{}.key", &cert_filename, cn);
-                        let node_cert_path = format!("../CA/root/certs/{}-kubeconfig-{}.crt", &cert_filename, cn);
-                        let node_key_path = format!("{}/{}/node-kubeconfig.key", &out_dir, &cert_filename);
+                        let node_cert_path = format!("{}/{}/node-kubeconfig", &out_dir, &cert_filename);
                         let outdir = format!("{}/CA/root", &config.out_dir);
 
                         cert_filename.push_str("-kubeconfig");
@@ -186,8 +188,9 @@ fn main() {
                             Ok(_) => (),
                             Err(err) => panic!("Error, when writing cert: {}", err),
                         }
-                        create_symlink(&cert_path, &node_cert_path);
-                        create_symlink(&key_path, &node_key_path);
+                        let sn = &bundle.cert.serial_number().to_bn().unwrap();
+                        let cert_name = format!("{}-{}", &cert_filename, sn);
+                        create_symlink("../CA/root", &cert_name, &node_cert_path);
                     },
                     Err(err) => panic!("{}", err),
                 }
@@ -205,12 +208,9 @@ fn main() {
                         let outdir = format!("{}/CA/etcd", &config.out_dir);
                         write_bundle_to_file(&bundle, &outdir, &cert_filename, config.overwrite).unwrap();
                         let cn = &bundle.cert.serial_number().to_bn().unwrap();
-                        let cert_path = format!("../CA/etcd/certs/{}-{}.crt", &cert_filename, cn);
-                        let key_path = format!("../CA/etcd/keys/{}-{}.key", &cert_filename, cn);
-                        let node_cert_path = format!("{}/{}/etcd.crt", &out_dir, &cert_filename);
-                        let node_key_path = format!("{}/{}/etcd.key", &out_dir, &cert_filename);
-                        create_symlink(&cert_path, &node_cert_path);
-                        create_symlink(&key_path, &node_key_path);
+                        let cert_name = format!("{}-{}", &cert_filename, cn);
+                        let node_cert_path = format!("{}/{}/etcd", &out_dir, &cert_filename);
+                        create_symlink("../CA/etcd", &cert_name, &node_cert_path);
                     },
                     Err(err) => panic!("{}", err),
                 }
