@@ -9,6 +9,13 @@ mod arg_parser;
 mod config_parser;
 mod kubernetes_certs;
 
+use std::io::Write;
+use std::os::unix::fs::symlink;
+use std::process::exit;
+use std::fs::OpenOptions;
+use std::fs;
+use kubernetes_certs::gen_cert;
+use kubernetes_certs::CertType;
 use kubernetes_certs::gen_main_ca_cert;
 use cert_machine::Bundle;
 use kubernetes_certs::gen_ca_cert;
@@ -16,8 +23,6 @@ use kubernetes_certs::write_bundle_to_file;
 use arg_parser::{CommandOptions, Command};
 use config_parser::Config;
 use gumdrop::Options;
-use std::process::exit;
-use std::fs;
 
 pub struct CA {
     pub main_ca: Box<Bundle>,
@@ -39,7 +44,15 @@ fn create_ca(config: &Config, out_dir: &str) -> Result<CA, &'static str> {
     println!("Creating CA with name: {}", config.cluster_name);
     let main_ca = match gen_main_ca_cert(&config) {
         Ok(bundle) => {
-            write_bundle_to_file(&bundle, &out_dir, "ca", config.overwrite).unwrap();
+            let outdir = format!("{}/CA/root", &out_dir);
+            let index_filename = format!("{}/index", &outdir);
+            let mut file = OpenOptions::new().write(true)
+                                     .create_new(true)
+                                     .open(&index_filename)
+                                     .unwrap();
+            let sn: u32 = 0;
+            file.write_all(sn.to_string().as_bytes()).unwrap();
+            write_bundle_to_file(&bundle, &outdir, "ca", config.overwrite).unwrap();
             bundle
         },
         Err(error) => return Err(error),
@@ -48,7 +61,15 @@ fn create_ca(config: &Config, out_dir: &str) -> Result<CA, &'static str> {
     println!("Create CA: etcd");
     let etcd_ca = match gen_ca_cert("etcd", Some(&main_ca), &config) {
         Ok(bundle) => {
-            write_bundle_to_file(&bundle, &out_dir,"etcd/etcd-ca", config.overwrite).unwrap();
+            let outdir = format!("{}/CA/etcd", &out_dir);
+            let index_filename = format!("{}/index", &outdir);
+            let mut file = OpenOptions::new().write(true)
+                                     .create_new(true)
+                                     .open(&index_filename)
+                                     .unwrap();
+            let sn: u32 = 0;
+            file.write_all(sn.to_string().as_bytes()).unwrap();
+            write_bundle_to_file(&bundle, &outdir,"ca", config.overwrite).unwrap();
             bundle
             },
         Err(error) => return Err(error),
@@ -57,7 +78,15 @@ fn create_ca(config: &Config, out_dir: &str) -> Result<CA, &'static str> {
     println!("Create CA: front proxy");
     let front_ca = match gen_ca_cert("front-proxy-ca", Some(&main_ca), &config) {
         Ok(bundle) => {
-            write_bundle_to_file(&bundle, &out_dir, "front-proxy-ca", config.overwrite).unwrap();
+            let outdir = format!("{}/CA/front-proxy", &out_dir);
+            let index_filename = format!("{}/index", &outdir);
+            let mut file = OpenOptions::new().write(true)
+                                     .create_new(true)
+                                     .open(&index_filename)
+                                     .unwrap();
+            let sn: u32 = 0;
+            file.write_all(sn.to_string().as_bytes()).unwrap();
+            write_bundle_to_file(&bundle, &outdir, "ca", config.overwrite).unwrap();
             bundle
         },
         Err(error) => return Err(error),
@@ -69,6 +98,29 @@ fn create_ca(config: &Config, out_dir: &str) -> Result<CA, &'static str> {
         front_ca,
     })
 }
+
+fn create_symlink(source: &str, dest: &str) {
+	if let Err(_) =  symlink(&source, &dest) {
+		match fs::symlink_metadata(&dest) {
+			Ok(ref metadata) => {
+				match metadata.file_type().is_symlink() {
+					true => {
+						fs::remove_file(&dest).unwrap();
+						symlink(&source, &dest).unwrap();
+					},
+					false => {
+						eprintln!("Unable to create symlink. \"{}\" exists and not a symlink!", &dest);
+						exit(1);
+					},
+				}
+			},
+			Err(err) => {
+				panic!("Enable to create symlink: {}", err);
+			},
+		}
+	}
+}
+
 
 fn main() {
     let opts = CommandOptions::parse_args_default_or_exit();
@@ -95,30 +147,70 @@ fn main() {
                     panic!("Error when creating certificate authority: {}", err);
                 },
             };
-
             for instance in config.worker.iter() {
+                let mut cert_filename = match instance.filename {
+                    Some(ref filename) => filename.to_owned(),
+                    None => instance.hostname.clone(),
+                };
+                let ca_symlink = format!("{}/{}/ca.crt", &out_dir, &cert_filename);
+                symlink("../CA/root/certs/ca.crt", &ca_symlink).unwrap();
+                match gen_cert(&ca, &config, &CertType::KubeletServer(&instance)) {
+                    Ok(bundle) => {
+                        let outdir = format!("{}/CA/root", &config.out_dir);
+                        match write_bundle_to_file(&bundle, &outdir, &cert_filename, config.overwrite) {
+                            Ok(_) => (),
+                            Err(err) => panic!("Error, when writing cert: {}", err),
+                        }
+                        let cn = &bundle.cert.serial_number().to_bn().unwrap();
+                        let cert_path = format!("../CA/root/certs/{}-{}.crt", &cert_filename, cn);
+                        let key_path = format!("../CA/root/keys/{}-{}.key", &cert_filename, cn);
+                        let node_cert_path = format!("{}/{}/node.crt", &out_dir, &cert_filename);
+                        let node_key_path = format!("{}/{}/node.key", &out_dir, &cert_filename);
+                        create_symlink(&cert_path, &node_cert_path);
+                        create_symlink(&key_path, &node_key_path);
+                    },
+                    Err(err) => panic!("Error when generate kubelet cert: {}", err),
+                }
                 match kubernetes_certs::gen_kubelet_cert(&instance, Some(&ca.main_ca), &config) {
                     Ok(bundle) => {
-                        let cert_filename = if let Some(ref filename) = instance.filename {
-                            filename.to_owned()
-                        } else {
-                            instance.hostname.clone()
-                        };
-                        write_bundle_to_file(&bundle, &out_dir, &cert_filename, config.overwrite).unwrap();
+                        let cn = &bundle.cert.serial_number().to_bn().unwrap();
+                        let cert_path = format!("../CA/root/certs/{}-kubeconfig-{}.crt", &cert_filename, cn);
+                        let key_path = format!("../CA/root/keys/{}-kubeconfig-{}.key", &cert_filename, cn);
+                        let node_cert_path = format!("../CA/root/certs/{}-kubeconfig-{}.crt", &cert_filename, cn);
+                        let node_key_path = format!("{}/{}/node-kubeconfig.key", &out_dir, &cert_filename);
+                        let outdir = format!("{}/CA/root", &config.out_dir);
+
+                        cert_filename.push_str("-kubeconfig");
+
+                        match write_bundle_to_file(&bundle, &outdir, &cert_filename, config.overwrite) {
+                            Ok(_) => (),
+                            Err(err) => panic!("Error, when writing cert: {}", err),
+                        }
+                        create_symlink(&cert_path, &node_cert_path);
+                        create_symlink(&key_path, &node_key_path);
                     },
                     Err(err) => panic!("{}", err),
                 }
             }
 
             for instance in config.etcd_server.iter() {
+                let mut cert_filename = match instance.filename {
+                    Some(ref filename) => filename.to_owned(),
+                    None => instance.hostname.clone(),
+                };
+                let ca_symlink = format!("{}/{}/etcd-ca.crt", &out_dir, &cert_filename);
+                symlink("../CA/etcd/certs/ca.crt", &ca_symlink).unwrap();
                 match kubernetes_certs::gen_etcd_cert(&instance, Some(&ca.etcd_ca), &config) {
                     Ok(bundle) => {
-                        let cert_filename = if let Some(ref filename) = instance.filename {
-                            filename.to_owned()
-                        } else {
-                            instance.hostname.clone()
-                        };
-                        write_bundle_to_file(&bundle, &out_dir, &cert_filename, config.overwrite).unwrap();
+                        let outdir = format!("{}/CA/etcd", &config.out_dir);
+                        write_bundle_to_file(&bundle, &outdir, &cert_filename, config.overwrite).unwrap();
+                        let cn = &bundle.cert.serial_number().to_bn().unwrap();
+                        let cert_path = format!("../CA/etcd/certs/{}-{}.crt", &cert_filename, cn);
+                        let key_path = format!("../CA/etcd/keys/{}-{}.key", &cert_filename, cn);
+                        let node_cert_path = format!("{}/{}/etcd.crt", &out_dir, &cert_filename);
+                        let node_key_path = format!("{}/{}/etcd.key", &out_dir, &cert_filename);
+                        create_symlink(&cert_path, &node_cert_path);
+                        create_symlink(&key_path, &node_key_path);
                     },
                     Err(err) => panic!("{}", err),
                 }
@@ -137,46 +229,56 @@ fn main() {
         Some(Command::GenCerts(_)) => {
             let ca = CA::read_from_fs("certs");
 
-            for instance in config.worker.iter() {
-                match kubernetes_certs::gen_kubelet_cert(&instance, Some(&ca.main_ca), &config) {
+            for worker in config.worker.iter() {
+
+                match gen_cert(&ca, &config, &CertType::Kubelet(&worker)) {
                     Ok(bundle) => {
-                        let cert_filename = if let Some(ref filename) = instance.filename {
-                            filename.to_owned()
-                        } else {
-                            instance.hostname.clone()
+                        let mut cert_filename = match worker.filename {
+                            Some(ref filename) => filename.to_owned(),
+                            None => worker.hostname.clone(),
                         };
-                        write_bundle_to_file(&bundle, &out_dir, &cert_filename, config.overwrite).unwrap();
+                        cert_filename = format!("{}/node.kubeconf", cert_filename);
+                        match write_bundle_to_file(&bundle, &config.out_dir, &cert_filename, config.overwrite) {
+                            Ok(_) => (),
+                            Err(err) => panic!("Error, when writing cert: {}", err),
+                        }
                     },
-                    Err(err) => panic!("{}", err),
+                    Err(err) => panic!("Error when generate kubelet cert: {}", err),
+                }
+                match gen_cert(&ca, &config, &CertType::KubeletServer(&worker)) {
+                    Ok(bundle) => {
+                        let mut cert_filename = match worker.filename {
+                            Some(ref filename) => filename.to_owned(),
+                            None => worker.hostname.clone(),
+                        };
+                        cert_filename = format!("{}/node", cert_filename);
+                        match write_bundle_to_file(&bundle, &config.out_dir, &cert_filename, config.overwrite) {
+                            Ok(_) => (),
+                            Err(err) => panic!("Error, when writing cert: {}", err),
+                        }
+                    },
+                    Err(err) => panic!("Error when generate kubelet cert: {}", err),
                 }
             }
 
             for instance in config.etcd_server.iter() {
-                match kubernetes_certs::gen_etcd_cert(&instance, Some(&ca.etcd_ca), &config) {
+                match gen_cert(&ca, &config, &CertType::EtcdServer(&instance)) {
                     Ok(bundle) => {
-                        let cert_filename = if let Some(ref filename) = instance.filename {
-                            filename.to_owned()
-                        } else {
-                            instance.hostname.clone()
+                        let mut cert_filename = match instance.filename {
+                            Some(ref filename) => filename.to_owned(),
+                            None => instance.hostname.clone(),
                         };
-                        write_bundle_to_file(&bundle, &out_dir, &cert_filename, config.overwrite).unwrap();
+                        cert_filename = format!("{}/etcd", cert_filename);
+                        match write_bundle_to_file(&bundle, &config.out_dir, &cert_filename, config.overwrite) {
+                            Ok(_) => (),
+                            Err(err) => panic!("Error, when writing cert: {}", err),
+                        }
                     },
-                    Err(err) => panic!("{}", err),
+                    Err(err) => panic!("Error when generate etcd cert: {}", err),
                 }
             }
-
             kubernetes_certs::kube_certs(&ca, &config, &out_dir);
         },
         None => (),
-    }
-
-    println!("Creating output dirs.");
-    let etcd_dir = format!("{}/etcd", out_dir);
-    match fs::create_dir_all(etcd_dir) {
-        Ok(_) => (),
-        Err(e) => {
-            eprintln!("Error when creating dir: {:#?}", e);
-            exit(1);
-        }
     }
 }

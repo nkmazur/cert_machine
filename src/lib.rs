@@ -366,7 +366,6 @@ impl<'a> CertificateParameters<'a> {
                 cert,
                 key,
         });
-        println!("Stop cert generation!");
         Ok(bundle)
     }
 }

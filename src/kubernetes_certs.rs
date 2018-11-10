@@ -1,7 +1,4 @@
 use openssl::bn::BigNum;
-// use kubernetes_certs::CertType::KubeletServer;
-// use kubernetes_certs::CertType::Kubelet;
-// use kubernetes_certs::CertType::EtcdServer;
 use CA;
 use std::fs;
 use std::io;
@@ -9,13 +6,12 @@ use std::path::Path;
 use std::fs::OpenOptions;
 use std::fs::File;
 use std::io::prelude::*;
-use std::collections::HashMap;
 use openssl::pkey::PKey;
 use openssl::rsa::Rsa;
 use config_parser::{Config, Instance};
 use cert_machine::{CertificateParameters, Subject, Bundle};
 
-pub enum CertType {
+pub enum CertType<'a> {
     Admin,
     ApiServer,
     ApiServerClient,
@@ -24,9 +20,9 @@ pub enum CertType {
     FrontProxy,
     Scheduler,
     Proxy,
-    EtcdServer(String),
-    Kubelet(String),
-    KubeletServer(String),
+    EtcdServer(&'a Instance),
+    Kubelet(&'a Instance),
+    KubeletServer(&'a Instance),
 }
 
 fn opt_str(opt_string: &Option<String>) -> Option<&str> {
@@ -37,55 +33,68 @@ fn opt_str(opt_string: &Option<String>) -> Option<&str> {
 }
 
 pub fn write_bundle_to_file(bundle: &Bundle, out_dir: &str, filename: &str, overwrite: bool) -> Result<(), io::Error> {
-    let crt_filename = format!("{}/{}.crt", &out_dir, &filename);
-    let key_filename = format!("{}/{}.key", &out_dir, &filename);
+    let sn = bundle.cert.serial_number().to_bn().unwrap();
+    let (crt_filename, key_filename) = match filename {
+        "ca" => {
+            let crt_filename = format!("{}/certs/{}.crt", &out_dir, &filename);
+            let key_filename = format!("{}/keys/{}.key", &out_dir, &filename);
+            (crt_filename, key_filename)
+        },
+        _ => {
+            let crt_filename = format!("{}/certs/{}-{}.crt", &out_dir, &filename, sn);
+            let key_filename = format!("{}/keys/{}-{}.key", &out_dir, &filename, sn);
+            (crt_filename, key_filename)
+        },
+    };
+    println!("Write to:\n{}\n{}", &crt_filename, &key_filename);
 
     match Path::new(&crt_filename).exists() {
-        false => fs::write(&crt_filename, bundle.to_pem())?,
+        false => fs::write(&crt_filename, bundle.to_pem()).expect("Unable to write cert!"),
         true => {
             if overwrite {
                 println!("OVERWRITING: {}", &crt_filename);
-                fs::write(&crt_filename, bundle.to_pem())?;
+                fs::write(&crt_filename, bundle.to_pem()).expect("Unable to write cert!");
             } else {
                 eprintln!("File exists: {}!", crt_filename);
-                // return
             }
         },
     }
     match Path::new(&key_filename).exists() {
-        false => fs::write(&key_filename, &bundle.key)?,
+        false => fs::write(&key_filename, &bundle.key).expect("Unable to write key!"),
         true => {
             if overwrite {
                 println!("OVERWRITING: {}", &crt_filename);
-                fs::write(&key_filename, &bundle.key)?;
+                fs::write(&key_filename, &bundle.key).expect("Unable to write key!");
             } else {
                 eprintln!("File exists: {}!", key_filename);
                 return Ok(())
             }
         },
     }
-    let last_sn = bundle.cert.serial_number().to_bn().unwrap();
+    // let mut sn = bundle.cert.serial_number().to_bn().expect("Unable to get serial number from cert!");
     let index_filename  = format!("{}/index", &out_dir);
-    match write_sn(&index_filename, last_sn) {
+    // sn.add_word(1).unwrap();
+    println!("Index filename: {}\nWroted sn: {}", &index_filename, &sn);
+    match write_sn(&index_filename, sn) {
         Ok(_) => (),
-        Err(err) => panic!("Error when writing index file: {}", err),
+        Err(err) => panic!("Error when writing index file: {}, file: {}", err, &index_filename),
     }
     Ok(())
 }
 
-fn get_sn(filename: &str) -> Result<u32, io::Error> {
-    match Path::new(filename).exists() {
+fn  get_sn(filename: &str) -> Result<u32, io::Error> {
+    match Path::new(&filename).exists() {
         false => {
             let mut file = OpenOptions::new().write(true)
                                      .create_new(true)
-                                     .open("index")
+                                     .open(&filename)
                                      .unwrap();
             let sn: u32 = 0;
             file.write_all(sn.to_string().as_bytes()).unwrap();
             Ok(sn)
         },
         true => {
-            let mut file = File::open("index")?;
+            let mut file = File::open(&filename)?;
             let mut contents = String::new();
             file.read_to_string(&mut contents)?;
             let sn: u32 = match contents.trim().parse() {
@@ -94,6 +103,7 @@ fn get_sn(filename: &str) -> Result<u32, io::Error> {
                     panic!("Unable to read index from index file: {}", err);
                 },
             };
+            println!("Got sn: {}", sn);
             Ok(sn)
         },
     }
@@ -107,21 +117,27 @@ fn write_sn(filename: &str, sn: BigNum) -> Result<(), io::Error> {
 }
 
 pub fn create_directory_struct(config: &Config, root_dir: &str) -> io::Result<()>{
-    let certs = format!("{}/certs", root_dir);
-    let keys = format!("{}/keys", root_dir);
-    let ca_certs = format!("{}/ca/certs", root_dir);
-    let ca_keys = format!("{}/ca/keys", root_dir);
-    fs::create_dir_all(certs)?;
-    fs::create_dir_all(keys)?;
-    fs::create_dir_all(ca_certs)?;
-    fs::create_dir_all(ca_keys)?;
+    let root_ca_certs = format!("{}/CA/root/certs", root_dir);
+    let root_ca_keys = format!("{}/CA/root/keys", root_dir);
+    let etcd_ca_certs = format!("{}/CA/etcd/certs", root_dir);
+    let etcd_ca_keys = format!("{}/CA/etcd/keys", root_dir);
+    let front_ca_certs = format!("{}/CA/front-proxy/certs", root_dir);
+    let front_ca_keys = format!("{}/CA/front-proxy/keys", root_dir);
+    let master_dir = format!("{}/master", root_dir);
+    fs::create_dir_all(root_ca_certs)?;
+    fs::create_dir_all(root_ca_keys)?;
+    fs::create_dir_all(etcd_ca_certs)?;
+    fs::create_dir_all(etcd_ca_keys)?;
+    fs::create_dir_all(front_ca_certs)?;
+    fs::create_dir_all(front_ca_keys)?;
+    fs::create_dir_all(master_dir)?;
     for worker in config.worker.iter() {
         let worker_dir = if let Some(ref filename) = worker.filename {
             filename.to_owned()
         } else {
             worker.hostname.clone()
         };
-        let dir = format!("{}/{}.node", root_dir, worker_dir);
+        let dir = format!("{}/{}", root_dir, worker_dir);
         fs::create_dir_all(dir)?;
     }
     for etcd_server in config.etcd_server.iter() {
@@ -130,7 +146,7 @@ pub fn create_directory_struct(config: &Config, root_dir: &str) -> io::Result<()
         } else {
             etcd_server.hostname.clone()
         };
-        let dir = format!("{}/{}.etcd", root_dir, etcd_dir);
+        let dir = format!("{}/{}", root_dir, etcd_dir);
         fs::create_dir_all(dir)?;
     }
     Ok(())
@@ -139,7 +155,7 @@ pub fn create_directory_struct(config: &Config, root_dir: &str) -> io::Result<()
 pub fn gen_main_ca_cert(config: &Config)  -> Result<Box<Bundle>, &'static str> {
     let ca_cert = CertificateParameters {
         key_length: config.ca.key_size,
-        serial_number: 1,
+        serial_number: 0,
         validity_days: config.ca.validity_days,
         subject: Subject {
             common_name: &config.cluster_name,
@@ -173,18 +189,15 @@ pub fn gen_ca_cert(cn: &str, main_ca: Option<&Box<Bundle>>, config: &Config) -> 
 pub fn gen_kubelet_cert(worker: &Instance, ca: Option<&Box<Bundle>>, config: &Config) -> Result<Box<Bundle>, &'static str> {
     println!("Creating cert for node: {}", worker.hostname);
 
-    // let cert_filename = if let Some(ref filename) = worker.filename {
-    //     filename.to_owned()
-    // } else {
-    //     worker.hostname.clone()
-    // };
-
-    // let cert_filename = format!("{}.kubeconf", cert_filename);
-
     let cn = &format!("system:node:{}", &worker.hostname);
 
     let mut client_cert = CertificateParameters::client(&cn,
         config.key_size, config.validity_days);
+    let index_filename  = format!("{}/CA/root/index", &config.out_dir);
+    client_cert.serial_number =  match get_sn(&index_filename) {
+        Ok(sn) => sn + 1,
+        Err(err) => panic!("Error when gettitng index: {}, file: {}", err, &index_filename),
+    };
     client_cert.subject.organization = Some("system:nodes");
     client_cert.ca = ca;
 
@@ -194,14 +207,13 @@ pub fn gen_kubelet_cert(worker: &Instance, ca: Option<&Box<Bundle>>, config: &Co
 pub fn gen_kubelet_server_cert(worker: &Instance, ca: Option<&Box<Bundle>>, config: &Config) -> Result<Box<Bundle>, &'static str> {
     println!("Creating server cert for node: {}", worker.hostname);
 
-    // let cert_filename = if let Some(ref filename) = worker.filename {
-    //     filename.to_owned()
-    // } else {
-    //     worker.hostname.clone()
-    // };
-
     let mut server_cert = CertificateParameters::server(&worker.hostname,
         config.key_size, config.validity_days);
+    let index_filename  = format!("{}/CA/root/index", &config.out_dir);
+    server_cert.serial_number =  match get_sn(&index_filename) {
+        Ok(sn) => sn + 1,
+        Err(err) => panic!("Error when gettitng index: {}, file: {}", err, &index_filename),
+    };
     server_cert.san = Some(worker.san.iter().map(|s| s as &str).collect());
     server_cert.ca = ca;
 
@@ -210,55 +222,51 @@ pub fn gen_kubelet_server_cert(worker: &Instance, ca: Option<&Box<Bundle>>, conf
 
 pub fn gen_etcd_cert(worker: &Instance, ca: Option<&Box<Bundle>>, config: &Config) -> Result<Box<Bundle>, &'static str> {
     println!("Creating cert for etcd node: {}", worker.hostname);
-
-    // let cert_filename = if let Some(ref filename) = worker.filename {
-    //     filename.to_owned()
-    // } else {
-    //     worker.hostname.clone()
-    // };
-
     let mut cert = CertificateParameters::client_and_server(&worker.hostname,
         config.key_size, config.validity_days);
+    let index_filename  = format!("{}/CA/etcd/index", &config.out_dir);
+    cert.serial_number =  match get_sn(&index_filename) {
+        Ok(sn) => sn + 1,
+        Err(err) => panic!("Error when gettitng index: {}, file: {}", err, &index_filename),
+    };
     cert.san = Some(worker.san.iter().map(|s| s as &str).collect());
     cert.ca = ca;
     cert.gen_cert()
 }
 
 pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
+    let main_ca_dir = format!("{}/CA/root", &out_dir);
+    let front_ca_dir = format!("{}/CA/front-proxy", &out_dir);
     match gen_cert(&ca, &config, &CertType::Admin) {
-        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "admin", config.overwrite).unwrap(),
+        Ok(bundle) => write_bundle_to_file(&bundle, &main_ca_dir, "admin", config.overwrite).unwrap(),
         Err(err) => panic!("Error: {}", err),
     };
     match gen_cert(&ca, &config, &CertType::ApiServer) {
-        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "apiserver", config.overwrite).unwrap(),
+        Ok(bundle) => write_bundle_to_file(&bundle, &main_ca_dir, "apiserver", config.overwrite).unwrap(),
         Err(err) => panic!("Error: {}", err),
     };
     match gen_cert(&ca, &config, &CertType::ApiServerClient) {
-        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "apiserver-kubelet-client", config.overwrite).unwrap(),
-        Err(err) => panic!("Error: {}", err),
-    };
-    match gen_cert(&ca, &config, &CertType::ApiServerClient) {
-        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "apiserver-kubelet-client", config.overwrite).unwrap(),
+        Ok(bundle) => write_bundle_to_file(&bundle, &main_ca_dir, "apiserver-kubelet-client", config.overwrite).unwrap(),
         Err(err) => panic!("Error: {}", err),
     };
     match gen_cert(&ca, &config, &CertType::ApiServerEtcdClient) {
-        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "apiserver-etcd-client", config.overwrite).unwrap(),
+        Ok(bundle) => write_bundle_to_file(&bundle, &main_ca_dir, "apiserver-etcd-client", config.overwrite).unwrap(),
         Err(err) => panic!("Error: {}", err),
     };
     match gen_cert(&ca, &config, &CertType::ControllerManager) {
-        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "kube-controller-manager", config.overwrite).unwrap(),
+        Ok(bundle) => write_bundle_to_file(&bundle, &main_ca_dir, "kube-controller-manager", config.overwrite).unwrap(),
         Err(err) => panic!("Error: {}", err),
     };
     match gen_cert(&ca, &config, &CertType::Scheduler) {
-        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "kube-scheduler", config.overwrite).unwrap(),
+        Ok(bundle) => write_bundle_to_file(&bundle, &main_ca_dir, "kube-scheduler", config.overwrite).unwrap(),
         Err(err) => panic!("Error: {}", err),
     };
     match gen_cert(&ca, &config, &CertType::FrontProxy) {
-        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "front-proxy-client", config.overwrite).unwrap(),
+        Ok(bundle) => write_bundle_to_file(&bundle, &front_ca_dir, "front-proxy-client", config.overwrite).unwrap(),
         Err(err) => panic!("Error: {}", err),
     };
     match gen_cert(&ca, &config, &CertType::Proxy) {
-        Ok(bundle) => write_bundle_to_file(&bundle, &out_dir, "kube-proxy", config.overwrite).unwrap(),
+        Ok(bundle) => write_bundle_to_file(&bundle, &main_ca_dir, "kube-proxy", config.overwrite).unwrap(),
         Err(err) => panic!("Error: {}", err),
     };
 
@@ -357,11 +365,11 @@ pub fn front_proxy_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -
     fpc.gen_cert()
 }
 
-fn gen_cert(ca: &CA, config: &Config, cert_type: &CertType) -> Result<Box<Bundle>, &'static str> {
-    let index_filename  = format!("{}/index", &config.out_dir);
+pub fn gen_cert(ca: &CA, config: &Config, cert_type: &CertType) -> Result<Box<Bundle>, &'static str> {
+    let index_filename  = format!("{}/CA/root/index", &config.out_dir);
     let sn =  match get_sn(&index_filename) {
-        Ok(sn) => sn,
-        Err(err) => panic!("Error when gettitng index: {}", err),
+        Ok(sn) => sn + 1,
+        Err(err) => panic!("Error when gettitng index: {}, file: {}", err, &index_filename),
     };
     match cert_type {
         CertType::Admin => admin_cert(&ca.main_ca, &config, sn),
@@ -369,41 +377,26 @@ fn gen_cert(ca: &CA, config: &Config, cert_type: &CertType) -> Result<Box<Bundle
         CertType::ApiServerClient => apiserver_client_cert(&ca.main_ca, &config, sn),
         CertType::ApiServerEtcdClient => apiserver_etcd_client_cert(&ca.etcd_ca, &config, sn),
         CertType::ControllerManager => controller_manager_cert(&ca.main_ca, &config, sn),
-        CertType::FrontProxy => front_proxy_cert(&ca.front_ca, &config, sn),
+        CertType::FrontProxy => {
+            let index_filename  = format!("{}/CA/front-proxy/index", &config.out_dir);
+            let sn =  match get_sn(&index_filename) {
+                Ok(sn) => sn + 1,
+                Err(err) => panic!("Error when gettitng index: {}, file: {}", err, &index_filename),
+            };
+            front_proxy_cert(&ca.front_ca, &config, sn)
+        },
         CertType::Scheduler => scheduler_cert(&ca.main_ca, &config, sn),
         CertType::Proxy => proxy_cert(&ca.main_ca, &config, sn),
-        CertType::EtcdServer(ref hostname) => {
-            let mut instances: HashMap<&str, &Instance> = HashMap::new();
-            for instance in config.etcd_server.iter() {
-                instances.insert(&instance.hostname, &instance);
-            }
-            let etcd_instance = match instances.get::<str>(&hostname) {
-                Some(instance) => instance,
-                None => panic!("No such etcd hostname found: {}", &hostname),
-            };
-            gen_etcd_cert(&etcd_instance, Some(&ca.etcd_ca), &config)
-        },
-        CertType::Kubelet(ref hostname) => {
-            let mut instances: HashMap<&str, &Instance> = HashMap::new();
-            for instance in config.worker.iter() {
-                instances.insert(&instance.hostname, &instance);
-            }
-            let worker = match instances.get::<str>(&hostname) {
-                Some(instance) => instance,
-                None => panic!("No such worker hostname found: {}", &hostname),
-            };
-            gen_kubelet_cert(&worker, Some(&ca.main_ca), &config)
-        },
-        CertType::KubeletServer(ref hostname) => {
-            let mut instances: HashMap<&str, &Instance> = HashMap::new();
-            for instance in config.worker.iter() {
-                instances.insert(&instance.hostname, &instance);
-            }
-            let worker = match instances.get::<str>(&hostname) {
-                Some(instance) => instance,
-                None => panic!("No such worker hostname found: {}", &hostname),
-            };
-            gen_kubelet_server_cert(&worker, Some(&ca.main_ca), &config)
-        },
+        CertType::EtcdServer(ref etcd_instance) => gen_etcd_cert(&etcd_instance, Some(&ca.etcd_ca), &config),
+        CertType::Kubelet(ref worker) => gen_kubelet_cert(&worker, Some(&ca.main_ca), &config),
+        CertType::KubeletServer(ref worker) => gen_kubelet_server_cert(&worker, Some(&ca.main_ca), &config),
+        // let mut instances: HashMap<&str, &Instance> = HashMap::new();
+        // for instance in config.etcd_server.iter() {
+        //     instances.insert(&instance.hostname, &instance);
+        // }
+        // let etcd_instance = match instances.get::<str>(&hostname) {
+        //     Some(instance) => instance,
+        //     None => panic!("No such etcd hostname found: {}", &hostname),
+        // };
     }
 }
