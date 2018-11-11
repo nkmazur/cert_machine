@@ -9,6 +9,8 @@ mod arg_parser;
 mod config_parser;
 mod kubernetes_certs;
 
+use config_parser::Instance;
+use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::fs::symlink;
 use std::process::exit;
@@ -331,10 +333,59 @@ fn main() {
                         Err(err) => panic!("Error: {}", err),
                     }
                 },
-                _ => println!("No such certificate kind!"),
+                _ => {
+                    if options.kind.starts_with("kubelet:") {
+                        let hostname = options.kind.clone().split_off(8);
+                        println!("Gen cert for {} node!", hostname);
+
+                        let mut instances: HashMap<&str, &Instance> = HashMap::new();
+                        for instance in config.worker.iter() {
+                            instances.insert(&instance.hostname, &instance);
+                        }
+                        let instance = match instances.get::<str>(&hostname) {
+                            Some(instance) => instance,
+                            None => panic!("No such kubelet hostname found: {}", &hostname),
+                        };
+                        let mut cert_filename = match instance.filename {
+                            Some(ref filename) => filename.to_owned(),
+                            None => instance.hostname.clone(),
+                        };
+                        match gen_cert(&ca, &config, &CertType::KubeletServer(&instance)) {
+                            Ok(bundle) => {
+                                let outdir = format!("{}/CA/root", &config.out_dir);
+                                match write_bundle_to_file(&bundle, &outdir, &cert_filename, config.overwrite) {
+                                    Ok(_) => (),
+                                    Err(err) => panic!("Error, when writing cert: {}", err),
+                                }
+                                let sn = &bundle.cert.serial_number().to_bn().unwrap();
+                                let cert_name = format!("{}-{}", &cert_filename, sn);
+                                let node_cert_path = format!("{}/{}/node", &out_dir, &cert_filename);
+                                create_symlink("../CA/root", &cert_name, &node_cert_path);
+                            },
+                            Err(err) => panic!("Error when generate kubelet cert: {}", err),
+                        }
+                        match kubernetes_certs::gen_kubelet_cert(&instance, Some(&ca.main_ca), &config) {
+                            Ok(bundle) => {
+                                let node_cert_path = format!("{}/{}/node-kubeconfig", &out_dir, &cert_filename);
+                                let outdir = format!("{}/CA/root", &config.out_dir);
+
+                                cert_filename.push_str("-kubeconfig");
+
+                                match write_bundle_to_file(&bundle, &outdir, &cert_filename, config.overwrite) {
+                                    Ok(_) => (),
+                                    Err(err) => panic!("Error, when writing cert: {}", err),
+                                }
+                                let sn = &bundle.cert.serial_number().to_bn().unwrap();
+                                let cert_name = format!("{}-{}", &cert_filename, sn);
+                                create_symlink("../CA/root", &cert_name, &node_cert_path);
+                            },
+                            Err(err) => panic!("{}", err),
+                        }
+                    } else {
+                        println!("No such certificate kind!");
+                    }
+                }
             }
-
-
         },
         None => (),
     }
