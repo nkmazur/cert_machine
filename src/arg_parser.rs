@@ -16,8 +16,8 @@ pub enum Command {
     New(NewOpts),
     #[options(help = "Create new CA")]
     InitCa(InitOpts),
-    #[options(help = "Create new certificates")]
-    GenCerts(GenOpts),
+    #[options(help = "Create new certificate")]
+    GenCert(GenOpts),
 }
 
 #[derive(Options)]
@@ -44,4 +44,6 @@ pub struct GenOpts {
     help: bool,
     #[options(help = "target directory")]
     pub dir: Option<String>,
+    #[options(help = "specify kind of certificates")]
+    pub kind: String,
 }

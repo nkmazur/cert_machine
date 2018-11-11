@@ -32,10 +32,13 @@ pub struct CA {
 
 impl CA {
     fn read_from_fs(dir: &str) -> CA {
+        let main_ca_dir = format!("{}/CA/root", &dir);
+        let etcd_ca_dir = format!("{}/CA/etcd", &dir);
+        let front_ca_dir = format!("{}/CA/front-proxy", &dir);
         CA {
-            main_ca: Bundle::read_from_fs(&dir, "ca").unwrap(),
-            etcd_ca: Bundle::read_from_fs(&dir, "etcd/etcd-ca").unwrap(),
-            front_ca: Bundle::read_from_fs(&dir, "front-proxy-ca").unwrap(),
+            main_ca: Bundle::read_from_fs(&main_ca_dir, "ca").unwrap(),
+            etcd_ca: Bundle::read_from_fs(&etcd_ca_dir, "ca").unwrap(),
+            front_ca: Bundle::read_from_fs(&front_ca_dir, "ca").unwrap(),
         }
     }
 }
@@ -226,58 +229,112 @@ fn main() {
                 },
             };
         },
-        Some(Command::GenCerts(_)) => {
+        Some(Command::GenCert(options)) => {
+            let main_ca_dir = format!("{}/CA/root", &out_dir);
+            let etcd_ca_dir = format!("{}/CA/etcd", &out_dir);
+            let front_ca_dir = format!("{}/CA/front-proxy", &out_dir);
             let ca = CA::read_from_fs("certs");
-
-            for worker in config.worker.iter() {
-
-                match gen_cert(&ca, &config, &CertType::Kubelet(&worker)) {
-                    Ok(bundle) => {
-                        let mut cert_filename = match worker.filename {
-                            Some(ref filename) => filename.to_owned(),
-                            None => worker.hostname.clone(),
-                        };
-                        cert_filename = format!("{}/node.kubeconf", cert_filename);
-                        match write_bundle_to_file(&bundle, &config.out_dir, &cert_filename, config.overwrite) {
-                            Ok(_) => (),
-                            Err(err) => panic!("Error, when writing cert: {}", err),
+            match options.kind.as_ref() {
+                "admin" => {
+                    match gen_cert(&ca, &config, &CertType::Admin) {
+                        Ok(bundle) => {
+                            let filename = format!("admin-{}", bundle.cert.serial_number().to_bn().unwrap());
+                            let symlink_path = format!("{}/master/admin", &out_dir);
+                            write_bundle_to_file(&bundle, &main_ca_dir, "admin", config.overwrite).unwrap();
+                            create_symlink("../CA/root", &filename, &symlink_path);
+                        },
+                        Err(err) => panic!("Error: {}", err),
+                    }
+                },
+                "apiserver" => {
+                    match gen_cert(&ca, &config, &CertType::ApiServer) {
+                        Ok(bundle) => {
+                            let filename = format!("apiserver-{}", bundle.cert.serial_number().to_bn().unwrap());
+                            let symlink_path = format!("{}/master/apiserver", &out_dir);
+                            write_bundle_to_file(&bundle, &main_ca_dir, "apiserver", config.overwrite).unwrap();
+                            create_symlink("../CA/root", &filename, &symlink_path);
+                        },
+                        Err(err) => panic!("Error: {}", err),
+                    }
+                },
+                "apiserver-client" => {
+                    match gen_cert(&ca, &config, &CertType::ApiServerClient) {
+                        Ok(bundle) => {
+                            let filename = format!("apiserver-kubelet-client-{}", bundle.cert.serial_number().to_bn().unwrap());
+                            let symlink_path = format!("{}/master/apiserver-kubelet-client", &out_dir);
+                            write_bundle_to_file(&bundle, &main_ca_dir, "apiserver-kubelet-client", config.overwrite).unwrap();
+                            create_symlink("../CA/root", &filename, &symlink_path);
+                        },
+                        Err(err) => panic!("Error: {}", err),
+                    }
+                },
+                "apiserver-etcd-client" => {
+                    match gen_cert(&ca, &config, &CertType::ApiServerEtcdClient) {
+                        Ok(bundle) => {
+                            let filename = format!("apiserver-etcd-client-{}", bundle.cert.serial_number().to_bn().unwrap());
+                            let symlink_path = format!("{}/master/apiserver-etcd-client", &out_dir);
+                            write_bundle_to_file(&bundle, &etcd_ca_dir, "apiserver-etcd-client", config.overwrite).unwrap();
+                            create_symlink("../CA/etcd", &filename, &symlink_path);
+                        },
+                        Err(err) => panic!("Error: {}", err),
+                    }
+                },
+                "controller-manager" => {
+                    match gen_cert(&ca, &config, &CertType::ControllerManager) {
+                        Ok(bundle) => {
+                            let filename = format!("kube-controller-manager-{}", bundle.cert.serial_number().to_bn().unwrap());
+                            let symlink_path = format!("{}/master/kube-controller-manager", &out_dir);
+                            write_bundle_to_file(&bundle, &main_ca_dir, "kube-controller-manager", config.overwrite).unwrap();
+                            create_symlink("../CA/root", &filename, &symlink_path);
                         }
-                    },
-                    Err(err) => panic!("Error when generate kubelet cert: {}", err),
-                }
-                match gen_cert(&ca, &config, &CertType::KubeletServer(&worker)) {
-                    Ok(bundle) => {
-                        let mut cert_filename = match worker.filename {
-                            Some(ref filename) => filename.to_owned(),
-                            None => worker.hostname.clone(),
-                        };
-                        cert_filename = format!("{}/node", cert_filename);
-                        match write_bundle_to_file(&bundle, &config.out_dir, &cert_filename, config.overwrite) {
-                            Ok(_) => (),
-                            Err(err) => panic!("Error, when writing cert: {}", err),
+                        Err(err) => panic!("Error: {}", err),
+                    }
+                },
+                "scheduler" => {
+                    match gen_cert(&ca, &config, &CertType::Scheduler) {
+                        Ok(bundle) => {
+                            let filename = format!("kube-scheduler-{}", bundle.cert.serial_number().to_bn().unwrap());
+                            let symlink_path = format!("{}/master/kube-scheduler", &out_dir);
+                            write_bundle_to_file(&bundle, &main_ca_dir, "kube-scheduler", config.overwrite).unwrap();
+                            create_symlink("../CA/root", &filename, &symlink_path);
                         }
-                    },
-                    Err(err) => panic!("Error when generate kubelet cert: {}", err),
-                }
+                        Err(err) => panic!("Error: {}", err),
+                    }
+                },
+                "front-proxy-client" => {
+                    match gen_cert(&ca, &config, &CertType::FrontProxy) {
+                        Ok(bundle) => {
+                            let filename = format!("front-proxy-client-{}", bundle.cert.serial_number().to_bn().unwrap());
+                            let symlink_path = format!("{}/master/front-proxy-client", &out_dir);
+                            write_bundle_to_file(&bundle, &front_ca_dir, "front-proxy-client", config.overwrite).unwrap();
+                            create_symlink("../CA/front-proxy", &filename, &symlink_path);
+                        }
+                        Err(err) => panic!("Error: {}", err),
+                    }
+                },
+                "proxy" => {
+                    match gen_cert(&ca, &config, &CertType::Proxy) {
+                        Ok(bundle) => {
+                            let filename = format!("kube-proxy-{}", bundle.cert.serial_number().to_bn().unwrap());
+                            let symlink_path = format!("{}/master/kube-proxy", &out_dir);
+                            write_bundle_to_file(&bundle, &main_ca_dir, "kube-proxy", config.overwrite).unwrap();
+                            create_symlink("../CA/root", &filename, &symlink_path);
+                            for worker in config.worker.iter() {
+                                let mut cert_filename = match worker.filename {
+                                    Some(ref filename) => filename.to_owned(),
+                                    None => worker.hostname.clone(),
+                                };
+                                let node_symlink_path = format!("{}/{}/kube-proxy", &out_dir, &cert_filename);
+                                create_symlink("../CA/root", &filename, &node_symlink_path);
+                            }
+                        }
+                        Err(err) => panic!("Error: {}", err),
+                    }
+                },
+                _ => println!("No such certificate kind!"),
             }
 
-            for instance in config.etcd_server.iter() {
-                match gen_cert(&ca, &config, &CertType::EtcdServer(&instance)) {
-                    Ok(bundle) => {
-                        let mut cert_filename = match instance.filename {
-                            Some(ref filename) => filename.to_owned(),
-                            None => instance.hostname.clone(),
-                        };
-                        cert_filename = format!("{}/etcd", cert_filename);
-                        match write_bundle_to_file(&bundle, &config.out_dir, &cert_filename, config.overwrite) {
-                            Ok(_) => (),
-                            Err(err) => panic!("Error, when writing cert: {}", err),
-                        }
-                    },
-                    Err(err) => panic!("Error when generate etcd cert: {}", err),
-                }
-            }
-            kubernetes_certs::kube_certs(&ca, &config, &out_dir);
+
         },
         None => (),
     }

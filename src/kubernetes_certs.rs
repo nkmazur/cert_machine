@@ -238,6 +238,7 @@ pub fn gen_etcd_cert(worker: &Instance, ca: Option<&Box<Bundle>>, config: &Confi
 
 pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
     let main_ca_dir = format!("{}/CA/root", &out_dir);
+    let etcd_ca_dir = format!("{}/CA/etcd", &out_dir);
     let front_ca_dir = format!("{}/CA/front-proxy", &out_dir);
     match gen_cert(&ca, &config, &CertType::Admin) {
         Ok(bundle) => {
@@ -247,7 +248,7 @@ pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
             create_symlink("../CA/root", &filename, &symlink_path);
         },
         Err(err) => panic!("Error: {}", err),
-    };
+    }
     match gen_cert(&ca, &config, &CertType::ApiServer) {
         Ok(bundle) => {
             let filename = format!("apiserver-{}", bundle.cert.serial_number().to_bn().unwrap());
@@ -256,7 +257,7 @@ pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
             create_symlink("../CA/root", &filename, &symlink_path);
         }
         Err(err) => panic!("Error: {}", err),
-    };
+    }
     match gen_cert(&ca, &config, &CertType::ApiServerClient) {
         Ok(bundle) => {
             let filename = format!("apiserver-kubelet-client-{}", bundle.cert.serial_number().to_bn().unwrap());
@@ -265,16 +266,16 @@ pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
             create_symlink("../CA/root", &filename, &symlink_path);
         }
         Err(err) => panic!("Error: {}", err),
-    };
+    }
     match gen_cert(&ca, &config, &CertType::ApiServerEtcdClient) {
         Ok(bundle) => {
             let filename = format!("apiserver-etcd-client-{}", bundle.cert.serial_number().to_bn().unwrap());
             let symlink_path = format!("{}/master/apiserver-etcd-client", &out_dir);
-            write_bundle_to_file(&bundle, &main_ca_dir, "apiserver-etcd-client", config.overwrite).unwrap();
-            create_symlink("../CA/root", &filename, &symlink_path);
+            write_bundle_to_file(&bundle, &etcd_ca_dir, "apiserver-etcd-client", config.overwrite).unwrap();
+            create_symlink("../CA/etcd", &filename, &symlink_path);
         }
         Err(err) => panic!("Error: {}", err),
-    };
+    }
     match gen_cert(&ca, &config, &CertType::ControllerManager) {
         Ok(bundle) => {
             let filename = format!("kube-controller-manager-{}", bundle.cert.serial_number().to_bn().unwrap());
@@ -283,7 +284,7 @@ pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
             create_symlink("../CA/root", &filename, &symlink_path);
         }
         Err(err) => panic!("Error: {}", err),
-    };
+    }
     match gen_cert(&ca, &config, &CertType::Scheduler) {
         Ok(bundle) => {
             let filename = format!("kube-scheduler-{}", bundle.cert.serial_number().to_bn().unwrap());
@@ -292,7 +293,7 @@ pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
             create_symlink("../CA/root", &filename, &symlink_path);
         }
         Err(err) => panic!("Error: {}", err),
-    };
+    }
     match gen_cert(&ca, &config, &CertType::FrontProxy) {
         Ok(bundle) => {
             let filename = format!("front-proxy-client-{}", bundle.cert.serial_number().to_bn().unwrap());
@@ -301,7 +302,7 @@ pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
             create_symlink("../CA/front-proxy", &filename, &symlink_path);
         }
         Err(err) => panic!("Error: {}", err),
-    };
+    }
     match gen_cert(&ca, &config, &CertType::Proxy) {
         Ok(bundle) => {
             let filename = format!("kube-proxy-{}", bundle.cert.serial_number().to_bn().unwrap());
@@ -318,7 +319,7 @@ pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
             }
         }
         Err(err) => panic!("Error: {}", err),
-    };
+    }
 
     let rsa = Rsa::generate(2048).unwrap();
     let key = rsa.private_key_to_pem().unwrap();

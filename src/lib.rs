@@ -38,8 +38,8 @@ impl Bundle {
     }
 
     pub fn read_from_fs(dir: &str, filename: &str) -> Result<Box<Bundle>, io::Error> {
-        let key_filename = format!("{}/{}.key", &dir, &filename);
-        let crt_filename = format!("{}/{}.crt", &dir, &filename);
+        let key_filename = format!("{}/keys/{}.key", &dir, &filename);
+        let crt_filename = format!("{}/certs/{}.crt", &dir, &filename);
 
         let key_file = fs::read(&key_filename)?;
         let cert_file = fs::read(&crt_filename)?;
