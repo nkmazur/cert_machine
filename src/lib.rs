@@ -2,9 +2,6 @@ extern crate openssl;
 
 use std::fs;
 use std::io;
-// use std::path::Path;
-// use std::fs::OpenOptions;
-// use std::io::prelude::*;
 use openssl::asn1::Asn1Time;
 use openssl::conf::Conf;
 use openssl::conf::ConfMethod;

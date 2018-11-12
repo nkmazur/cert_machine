@@ -14,6 +14,11 @@ use std::path::Path;
 use std::process::exit;
 use CA;
 
+pub struct User<'a> {
+    pub username: &'a str,
+    pub groups: Option<&'a str>,
+}
+
 pub enum CertType<'a> {
     Admin,
     ApiServer,
@@ -26,9 +31,10 @@ pub enum CertType<'a> {
     EtcdServer(&'a Instance),
     Kubelet(&'a Instance),
     KubeletServer(&'a Instance),
+    User(User<'a>),
 }
 
-fn opt_str(opt_string: &Option<String>) -> Option<&str> {
+pub fn opt_str(opt_string: &Option<String>) -> Option<&str> {
     match opt_string {
         Some(s) => Some(s.as_ref()),
         None => None,
@@ -79,9 +85,7 @@ pub fn write_bundle_to_file(
             }
         }
     }
-    // let mut sn = bundle.cert.serial_number().to_bn().expect("Unable to get serial number from cert!");
     let index_filename = format!("{}/index", &out_dir);
-    // sn.add_word(1).unwrap();
     println!("Index filename: {}\nWroted sn: {}", &index_filename, &sn);
     match write_sn(&index_filename, sn) {
         Ok(_) => (),
@@ -135,6 +139,7 @@ pub fn create_directory_struct(config: &Config, root_dir: &str) -> io::Result<()
     let front_ca_certs = format!("{}/CA/front-proxy/certs", root_dir);
     let front_ca_keys = format!("{}/CA/front-proxy/keys", root_dir);
     let master_dir = format!("{}/master", root_dir);
+    let users_dir = format!("{}/users", root_dir);
     fs::create_dir_all(root_ca_certs)?;
     fs::create_dir_all(root_ca_keys)?;
     fs::create_dir_all(etcd_ca_certs)?;
@@ -142,6 +147,7 @@ pub fn create_directory_struct(config: &Config, root_dir: &str) -> io::Result<()
     fs::create_dir_all(front_ca_certs)?;
     fs::create_dir_all(front_ca_keys)?;
     fs::create_dir_all(master_dir)?;
+    fs::create_dir_all(users_dir)?;
     for worker in config.worker.iter() {
         let worker_dir = if let Some(ref filename) = worker.filename {
             filename.to_owned()
@@ -410,8 +416,8 @@ pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
 
     fs::write(&sa_pub_filename, pkey).expect("Unable to write file!");
     fs::write(&sa_key_filename, key).expect("Unable to write file!");
-    symlink(&sa_pub_filename, &sa_pub_symlink).unwrap();
-    symlink(&sa_key_filename, &sa_key_symlink).unwrap();
+    symlink("../sa.pub", &sa_pub_symlink).unwrap();
+    symlink("../sa.key", &sa_key_symlink).unwrap();
 }
 
 pub fn admin_cert(
@@ -425,6 +431,15 @@ pub fn admin_cert(
     admin.ca = Some(&ca);
     admin.serial_number = serial_number;
     admin.gen_cert()
+}
+
+pub fn user_cert(ca: &Box<Bundle>, config: &Config, user: &User, serial_number: u32) -> Result<Box<Bundle>, &'static str> {
+    println!("Creating cert for Kubernetes admin");
+    let mut user_cert = CertificateParameters::client(&user.username, config.key_size, config.validity_days);
+    user_cert.subject.organization = user.groups;
+    user_cert.ca = Some(&ca);
+    user_cert.serial_number = serial_number;
+    user_cert.gen_cert()
 }
 
 pub fn apiserver_cert(
@@ -552,8 +567,6 @@ pub fn gen_cert(
     cert_type: &CertType,
 ) -> Result<Box<Bundle>, &'static str> {
     let root_index_filename = format!("{}/CA/root/index", &config.out_dir);
-    // let etcd_index_filename  = format!("{}/CA/root/index", &config.out_dir);
-    // let front_index_filename  = format!("{}/CA/root/index", &config.out_dir);
     let sn = match get_sn(&root_index_filename) {
         Ok(sn) => sn + 1,
         Err(err) => panic!(
@@ -593,5 +606,6 @@ pub fn gen_cert(
         CertType::EtcdServer(etcd_instance) => gen_etcd_cert(&etcd_instance, Some(&ca.etcd_ca), &config),
         CertType::Kubelet(ref worker) => gen_kubelet_cert(&worker, Some(&ca.main_ca), &config),
         CertType::KubeletServer(ref worker) => gen_kubelet_server_cert(&worker, Some(&ca.main_ca), &config),
+        CertType::User(user) => user_cert(&ca.main_ca, &config, user, sn)
     }
 }

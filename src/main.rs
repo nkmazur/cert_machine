@@ -9,6 +9,8 @@ mod arg_parser;
 mod config_parser;
 mod kubernetes_certs;
 
+use kubernetes_certs::opt_str;
+use kubernetes_certs::User;
 use config_parser::Instance;
 use std::collections::HashMap;
 use std::io::Write;
@@ -141,16 +143,6 @@ fn main() {
 
     let config = Config::new("config.toml");
     let out_dir = "certs".to_owned();
-
-    println!("Creating output dirs.");
-    let etcd_dir = format!("{}/etcd", out_dir);
-    match fs::create_dir_all(etcd_dir) {
-        Ok(_) => (),
-        Err(e) => {
-            eprintln!("Error when creating dir: {}", e);
-            exit(1);
-        }
-    }
 
     match opts.command {
         Some(Command::New(_)) => {
@@ -411,12 +403,35 @@ fn main() {
                             let cn = &bundle.cert.serial_number().to_bn().unwrap();
                             let cert_name = format!("{}-{}", &cert_filename, cn);
                             let node_cert_path = format!("{}/{}/etcd", &out_dir, &cert_filename);
-                            create_symlink("../CA/etcd", &cert_name, &node_cert_path);
+                            create_symlink("../CA/root", &cert_name, &node_cert_path);
                         },
                         Err(err) => panic!("{}", err),
                     }
                 },
                 _ => println!("No such certificate kind!"),
+            }
+        },
+        Some(Command::User(options)) => {
+            print!("Create user cert with name: {}", options.user);
+            let ca = CA::read_from_fs("certs");
+            match options.group {
+                Some(ref group) => println!(" and group: {}", group),
+                None => print!("\n"),
+            }
+            let user = User {
+                username: &options.user,
+                groups: opt_str(&options.group),
+            };
+            match gen_cert(&ca, &config, &CertType::User(user)) {
+                Ok(bundle) => {
+                    let outdir = format!("{}/CA/root", &config.out_dir);
+                    write_bundle_to_file(&bundle, &outdir, &options.user, config.overwrite).unwrap();
+                    let cn = &bundle.cert.serial_number().to_bn().unwrap();
+                    let cert_name = format!("{}-{}", &options.user, cn);
+                    let node_cert_path = format!("{}/users/{}", &out_dir, &options.user);
+                    create_symlink("../CA/root", &cert_name, &node_cert_path);
+                },
+                Err(err) => panic!("{}", err),
             }
         },
         None => (),
