@@ -60,7 +60,7 @@ pub fn write_bundle_to_file(
             (crt_filename, key_filename)
         }
     };
-    println!("Write to:\n{}\n{}", &crt_filename, &key_filename);
+    // println!("Write to:\n{}\n{}", &crt_filename, &key_filename);
 
     match Path::new(&crt_filename).exists() {
         false => fs::write(&crt_filename, bundle.to_pem()).expect("Unable to write cert!"),
@@ -86,7 +86,7 @@ pub fn write_bundle_to_file(
         }
     }
     let index_filename = format!("{}/index", &out_dir);
-    println!("Index filename: {}\nWroted sn: {}", &index_filename, &sn);
+    // println!("Index filename: {}\nWroted sn: {}", &index_filename, &sn);
     match write_sn(&index_filename, sn) {
         Ok(_) => (),
         Err(err) => panic!(
@@ -119,7 +119,7 @@ fn get_sn(filename: &str) -> Result<u32, io::Error> {
                     panic!("Unable to read index from index file: {}", err);
                 }
             };
-            println!("Got sn: {}", sn);
+            // println!("Got sn: {}", sn);
             Ok(sn)
         }
     }
@@ -434,7 +434,6 @@ pub fn admin_cert(
 }
 
 pub fn user_cert(ca: &Box<Bundle>, config: &Config, user: &User, serial_number: u32) -> Result<Box<Bundle>, &'static str> {
-    println!("Creating cert for Kubernetes admin");
     let mut user_cert = CertificateParameters::client(&user.username, config.key_size, config.validity_days);
     user_cert.subject.organization = user.groups;
     user_cert.ca = Some(&ca);

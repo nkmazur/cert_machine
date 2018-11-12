@@ -112,8 +112,8 @@ fn create_symlink(ca_dir: &str, cert_name: &str, dest: &str) {
         let source_filename = format!("{}/{}/{}.{}", &ca_dir, &postfix.1, &cert_name, &postfix.0);
         let dest_filename = format!("{}.{}", &dest, &postfix.0);
 
-        println!("Source filename: {}", &source_filename);
-        println!("Destination filename: {}", &dest_filename);
+        // println!("Source filename: {}", &source_filename);
+        // println!("Destination filename: {}", &dest_filename);
 
         if let Err(_) =  symlink(&source_filename, &dest_filename) {
             match fs::symlink_metadata(&dest_filename) {
@@ -327,7 +327,6 @@ fn main() {
                 },
                 kind if kind.starts_with("kubelet:") => {
                     let hostname = kind.clone().split_at(8);
-                    println!("Value of hostname.1: {}", hostname.1);
                     println!("Gen cert for {} node!", hostname.1);
 
                     let mut instances: HashMap<&str, &Instance> = HashMap::new();
