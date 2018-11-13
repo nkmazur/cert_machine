@@ -153,6 +153,11 @@ fn main() {
                     panic!("Error when creating certificate authority: {}", err);
                 },
             };
+            let root_ca_crt_symlink = format!("{}/master/ca.crt", &out_dir);
+            let root_ca_key_symlink = format!("{}/master/ca.key", &out_dir);
+
+            symlink("../CA/root/ca.crt", &root_ca_crt_symlink).unwrap();
+            symlink("../CA/root/ca.key", &root_ca_key_symlink).unwrap();
             for instance in config.worker.iter() {
                 let mut cert_filename = match instance.filename {
                     Some(ref filename) => filename.to_owned(),
