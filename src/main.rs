@@ -155,9 +155,15 @@ fn main() {
             };
             let root_ca_crt_symlink = format!("{}/master/ca.crt", &out_dir);
             let root_ca_key_symlink = format!("{}/master/ca.key", &out_dir);
+            let etcd_ca_crt_symlink = format!("{}/master/etcd-ca.crt", &out_dir);
+            let front_ca_crt_symlink = format!("{}/master/front-proxy-ca.crt", &out_dir);
+            let front_ca_key_symlink = format!("{}/master/front-proxy-ca.key", &out_dir);
 
-            symlink("../CA/root/ca.crt", &root_ca_crt_symlink).unwrap();
-            symlink("../CA/root/ca.key", &root_ca_key_symlink).unwrap();
+            symlink("../CA/root/certs/ca.crt", &root_ca_crt_symlink).unwrap();
+            symlink("../CA/root/keys/ca.key", &root_ca_key_symlink).unwrap();
+            symlink("../CA/etcd/certs/ca.key", &etcd_ca_crt_symlink).unwrap();
+            symlink("../CA/front-proxy/certs/ca.crt", &front_ca_crt_symlink).unwrap();
+            symlink("../CA/front-proxy/keys/ca.key", &front_ca_key_symlink).unwrap();
             for instance in config.worker.iter() {
                 let mut cert_filename = match instance.filename {
                     Some(ref filename) => filename.to_owned(),
@@ -407,7 +413,28 @@ fn main() {
                             let cn = &bundle.cert.serial_number().to_bn().unwrap();
                             let cert_name = format!("{}-{}", &cert_filename, cn);
                             let node_cert_path = format!("{}/{}/etcd", &out_dir, &cert_filename);
-                            create_symlink("../CA/root", &cert_name, &node_cert_path);
+                            let ca_cert_path = format!("{}/{}/etcd-ca.crt", &out_dir, &cert_filename);
+                            let output_directory = format!("{}/{}", &out_dir, &cert_filename);
+                            fs::create_dir_all(&output_directory).unwrap();
+                            create_symlink("../CA/etcd", &cert_name, &node_cert_path);
+                            symlink("../CA/etcd/certs/ca.crt", &ca_cert_path).unwrap();
+                        },
+                        Err(err) => panic!("{}", err),
+                    }
+                },
+                kind if kind.starts_with("etcd-user:") => {
+                    let username = kind.clone().split_at(10);
+
+                    println!("Gen cert for \"{}\" etcd user!", username.1);
+
+                    match kubernetes_certs::gen_etcd_user(&username.1, Some(&ca.etcd_ca), &config) {
+                        Ok(bundle) => {
+                            let outdir = format!("{}/CA/etcd", &config.out_dir);
+                            write_bundle_to_file(&bundle, &outdir, &username.1, config.overwrite).unwrap();
+                            let cn = &bundle.cert.serial_number().to_bn().unwrap();
+                            let cert_name = format!("{}-{}", &username.1, cn);
+                            let node_cert_path = format!("{}/users/{}", &out_dir, &username.1);
+                            create_symlink("../CA/etcd", &cert_name, &node_cert_path);
                         },
                         Err(err) => panic!("{}", err),
                     }

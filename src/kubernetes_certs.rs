@@ -281,6 +281,31 @@ pub fn gen_etcd_cert(
     cert.gen_cert()
 }
 
+pub fn gen_etcd_user(
+    username: &str,
+    ca: Option<&Box<Bundle>>,
+    config: &Config,
+) -> Result<Box<Bundle>, &'static str> {
+    let index_filename = format!("{}/CA/etcd/index", &config.out_dir);
+    let mut cert = CertificateParameters::client(
+        &username,
+        config.key_size,
+        config.validity_days,
+    );
+    cert.serial_number = match get_sn(&index_filename) {
+        Ok(sn) => sn + 1,
+        Err(err) => {
+            eprintln!(
+                "Error when gettitng index: {}, file: {}",
+                err, &index_filename
+            );
+            exit(1);
+        }
+    };
+    cert.ca = ca;
+    cert.gen_cert()
+}
+
 pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
     let main_ca_dir = format!("{}/CA/root", &out_dir);
     let etcd_ca_dir = format!("{}/CA/etcd", &out_dir);
