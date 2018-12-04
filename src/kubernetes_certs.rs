@@ -514,7 +514,9 @@ pub fn apiserver_etcd_client_cert(
 ) -> Result<Box<Bundle>, &'static str> {
     println!("Creating cert for Kubernetes ETCD client");
     let mut api_client = CertificateParameters::client(
-        "kube-apiserver-etcd-client",
+        // If etcd auth enable and apiserver etcd username is not root
+        // apiserver can't compact etcd storage
+        "root",
         config.key_size,
         config.validity_days,
     );

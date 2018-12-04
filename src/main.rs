@@ -161,7 +161,7 @@ fn main() {
 
             symlink("../CA/root/certs/ca.crt", &root_ca_crt_symlink).unwrap();
             symlink("../CA/root/keys/ca.key", &root_ca_key_symlink).unwrap();
-            symlink("../CA/etcd/certs/ca.key", &etcd_ca_crt_symlink).unwrap();
+            symlink("../CA/etcd/certs/ca.crt", &etcd_ca_crt_symlink).unwrap();
             symlink("../CA/front-proxy/certs/ca.crt", &front_ca_crt_symlink).unwrap();
             symlink("../CA/front-proxy/keys/ca.key", &front_ca_key_symlink).unwrap();
             for instance in config.worker.iter() {

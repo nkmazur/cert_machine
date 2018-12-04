@@ -340,7 +340,7 @@ impl<'a> CertificateParameters<'a> {
             builder.append_extension(issuer_key_ext).unwrap();
             builder.append_extension(key_ext).unwrap();
         } else {
-            let key_ext =               key_id.build(&builder.x509v3_context(None, Some(&conf))).unwrap();
+            let key_ext = key_id.build(&builder.x509v3_context(None, Some(&conf))).unwrap();
             // Because bug in rust-openssl. No method to set issuer key identifier if cert is self signed.
             // let issuer_key_ext = issuer_key_id.build(&builder.x509v3_context(None, Some(&conf))).unwrap();
             // builder.append_extension(issuer_key_ext).unwrap();
