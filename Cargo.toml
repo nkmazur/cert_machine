@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Nikita Mazur <nkamzur@yandex.ru>"]
 
 [dependencies]
-openssl = "0.10.15"
+openssl = "0.10.16"
 toml = "0.4"
 serde_derive = "1.0.78"
 serde = "1.0.78"
@@ -12,3 +12,7 @@ gumdrop = "0.5"
 
 [profile.release]
 lto = "thin"
+
+[[bin]]
+name = "cert-machine"
+path = "src/main.rs"

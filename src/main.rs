@@ -141,12 +141,17 @@ fn create_symlink(ca_dir: &str, cert_name: &str, dest: &str) {
 fn main() {
     let opts = CommandOptions::parse_args_default_or_exit();
 
-    let config = Config::new("config.toml");
-    let out_dir = "certs".to_owned();
+    let mut config = Config::new("config.toml");
+    // let out_dir = "certs".to_owned();
+    let out_dir = match opts.outdir {
+        Some(dir) => dir,
+        None => "certs".to_owned(),
+    };
+    config.out_dir = out_dir.to_owned();
 
     match opts.command {
         Some(Command::New(_)) => {
-            kubernetes_certs::create_directory_struct(&config, "certs").unwrap();
+            kubernetes_certs::create_directory_struct(&config, &out_dir).unwrap();
             let ca = match create_ca(&config, &out_dir) {
                 Ok(ca) => ca,
                 Err(err) => {
@@ -238,7 +243,7 @@ fn main() {
             let main_ca_dir = format!("{}/CA/root", &out_dir);
             let etcd_ca_dir = format!("{}/CA/etcd", &out_dir);
             let front_ca_dir = format!("{}/CA/front-proxy", &out_dir);
-            let ca = CA::read_from_fs("certs");
+            let ca = CA::read_from_fs(&out_dir);
             match options.kind.as_ref() {
                 "admin" => {
                     match gen_cert(&ca, &config, &CertType::Admin) {
@@ -355,6 +360,8 @@ fn main() {
                         Some(ref filename) => filename.to_owned(),
                         None => instance.hostname.clone(),
                     };
+                    let node_path = format!("{}/{}", &out_dir, &cert_filename);
+                    fs::create_dir_all(&node_path).unwrap();
                     match gen_cert(&ca, &config, &CertType::KubeletServer(&instance)) {
                         Ok(bundle) => {
                             let outdir = format!("{}/CA/root", &config.out_dir);
@@ -444,7 +451,7 @@ fn main() {
         },
         Some(Command::User(options)) => {
             print!("Create user cert with name: {}", options.user);
-            let ca = CA::read_from_fs("certs");
+            let ca = CA::read_from_fs(&out_dir);
             match options.group {
                 Some(ref group) => println!(" and group: {}", group),
                 None => print!("\n"),

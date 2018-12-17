@@ -6,6 +6,8 @@ pub struct CommandOptions {
     pub verbose: bool,
     #[options(help = "overwrites file if exists")]
     pub overwrite: bool,
+    #[options(help="output directory")]
+    pub outdir: Option<String>,
     #[options(command)]
     pub command: Option<Command>,
 }
