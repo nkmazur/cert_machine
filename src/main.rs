@@ -141,13 +141,20 @@ fn create_symlink(ca_dir: &str, cert_name: &str, dest: &str) {
 fn main() {
     let opts = CommandOptions::parse_args_default_or_exit();
 
-    let mut config = Config::new("config.toml");
-    // let out_dir = "certs".to_owned();
-    let out_dir = match opts.outdir {
-        Some(dir) => dir,
-        None => "certs".to_owned(),
-    };
-    config.out_dir = out_dir.to_owned();
+    let config_filename = opts.config.unwrap_or("config.toml".to_owned());
+    let mut config = Config::new(&config_filename);
+
+    let mut out_dir = String::new();
+
+    match opts.outdir {
+        Some(ref opts_outdir) => {
+            out_dir = opts_outdir.to_owned();
+            config.out_dir = opts_outdir.to_owned();
+        },
+        None => {
+            out_dir = config.out_dir.to_owned();
+        }
+    }
 
     match opts.command {
         Some(Command::New(_)) => {
