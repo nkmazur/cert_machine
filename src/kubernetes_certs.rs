@@ -129,6 +129,7 @@ pub fn create_directory_struct(config: &Config, root_dir: &str) -> io::Result<()
     let front_ca_keys = format!("{}/CA/front-proxy/keys", root_dir);
     let master_dir = format!("{}/master", root_dir);
     let users_dir = format!("{}/users", root_dir);
+    let etcd_users_dir = format!("{}/etcd-users", root_dir);
     fs::create_dir_all(root_ca_certs)?;
     fs::create_dir_all(root_ca_keys)?;
     fs::create_dir_all(etcd_ca_certs)?;
@@ -137,6 +138,7 @@ pub fn create_directory_struct(config: &Config, root_dir: &str) -> io::Result<()
     fs::create_dir_all(front_ca_keys)?;
     fs::create_dir_all(master_dir)?;
     fs::create_dir_all(users_dir)?;
+    fs::create_dir_all(etcd_users_dir)?;
     for worker in config.worker.iter() {
         let worker_dir = if let Some(ref filename) = worker.filename {
             filename.to_owned()
@@ -321,7 +323,7 @@ pub fn gen_etcd_user(username: &str, ca: Option<&Box<Bundle>>, config: &Config) 
     write_bundle_to_file(&bundle, &outdir, &username, config.overwrite).unwrap();
     let cn = &bundle.cert.serial_number().to_bn().unwrap();
     let cert_name = format!("{}-{}", &username, cn);
-    let node_cert_path = format!("{}/users/{}", &config.out_dir, &username);
+    let node_cert_path = format!("{}/etcd-users/{}", &config.out_dir, &username);
     create_symlink("../CA/etcd", &cert_name, &node_cert_path);
     Ok(bundle)
 }

@@ -1,7 +1,7 @@
 cluster_name = "Test kubernetes cluster"  # Common name for certificate authority
 validity_days = 365  # Validity in days for non CA certificates
 key_size = 2048  # Key size for all non CA certificates. Optional. Default: 2048
-master_san = ["10.0.21.1", "10.0.21.2", "10.0.21.3", "m1-test", "m2-test", "m3-test"]  # SAN for kubernetes-apiserver certificate
+master_san = ["10.0.21.1", "10.0.21.2", "10.0.21.3", "m1-test", "m2-test", "m3-test"]  # SAN for kube-apiserver certificate
 out_dir = "certificates"  # Directory where all certificates will be stored. Optional. Default: certs
 etcd_users = ["calico"]  # Additional user certs for etcd. Optional
 
@@ -18,27 +18,27 @@ hostname = "s3.test"
 san = ["10.0.22.4", "s3", "s3.test"]
 
 [[etcd_server]]  # Etcd node section
-filename = "etcd1.test"  # Directory name where certificates fot this instance will be stored. Optional
+filename = "etcd1.test"  # Directory name where certificates for this instance will be stored. Optional
 hostname = "etcd1-test"  # Hostname of etcd node
 san = ["10.0.23.1", "etcd1-test", "etcd1-test.novalocal"]  # SAN for etcd server and peer certificate
 
 [[etcd_server]]
 filename = "etcd2.test"
 hostname = "etcd2-test"
-san = ["10.0.23.2", "etcd2-test", "etcd2-test.novalocal"]
+san = ["10.0.23.2", "etcd2-test"]
 
 [[etcd_server]]
 filename = "etcd3.test"
 hostname = "etcd3-test"
-san = ["10.0.23.3", "etcd3-test", "etcd3-test.novalocal"]
+san = ["10.0.23.3", "etcd3-test"]
 
 [[user]]  # Kubernetes user section. Optional
 username = "devDan"  # Username
 group = "developers"  # Group. Optional
 
-[ca]  # Cartificate authority section
+[ca]  # Certificate authority section
 country = "RU"  # Country code can be presented in main CA cert. Optional
-organization = "Wonderful Tecnologies inc."  # Organization name can be presented in main CA cert. Optional
+organization = "Wonderful Technologies inc."  # Organization name can be presented in main CA cert. Optional
 organization_unit = "Container Ops"  # Organization unit can be presented in main CA cert. Optional
 locality = "Moscow"  # Locality can be presented in main CA cert. Optional
 validity_days = 1000  # Validity in days for all CA certs
