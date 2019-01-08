@@ -8,6 +8,8 @@ pub struct Config {
     pub cluster_name: String,
     pub worker: Vec<Instance>,
     pub etcd_server: Vec<Instance>,
+    pub user: Option<Vec<User>>,
+    pub etcd_users: Option<Vec<String>>,
     pub validity_days: u32,
     #[serde(default = "cert_key_size")]
     pub key_size: u32,
@@ -24,6 +26,12 @@ pub struct Instance {
     pub filename: Option<String>,
     pub hostname: String,
     pub san: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct User {
+    pub username: String,
+    pub group: Option<String>,
 }
 
 #[derive(Deserialize)]
