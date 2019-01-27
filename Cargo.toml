@@ -5,10 +5,13 @@ authors = ["Nikita Mazur <nkamzur@yandex.ru>"]
 
 [dependencies]
 openssl = "0.10.16"
-toml = "0.4"
 serde_derive = "1.0.78"
+serde_yaml = "0.8"
 serde = "1.0.78"
 gumdrop = "0.5"
+base64 = "0.10.1"
+toml = "0.4"
+
 
 [profile.release]
 lto = "thin"

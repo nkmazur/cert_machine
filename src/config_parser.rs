@@ -2,6 +2,8 @@ extern crate toml;
 
 use std::fs::File;
 use std::io::prelude::*;
+use std::path::Path;
+use std::process::exit;
 
 #[derive(Deserialize)]
 pub struct Config {
@@ -15,6 +17,8 @@ pub struct Config {
     pub key_size: u32,
     pub ca: Ca,
     pub master_san: Vec<String>,
+    pub apiserver_internal_address: String,
+    pub apiserver_external_address: String,
     #[serde(default = "overwrite_false")]
     pub overwrite: bool,
     #[serde(default = "out_dir")]
@@ -48,12 +52,22 @@ pub struct Ca {
 
 impl Config {
     pub fn new(filename: &str) -> Box<Config> {
+        if !Path::new(&filename).exists() {
+        	eprintln!("{} does not exists!", &filename);
+        	exit(1);
+        }
         let mut config_file = File::open(filename).unwrap();
         let mut contents = String::new();
 
         config_file.read_to_string(&mut contents).unwrap();
 
-        let config: Config = toml::from_str(&contents).unwrap();
+        let config: Config = match toml::from_str(&contents) {
+        	Err(err) => {
+        		eprintln!("Config parse error: {}", err);
+        		exit(1);
+        	},
+        	Ok(config) => config,
+        };
 
         Box::new(config)
     }

@@ -1,6 +1,8 @@
 use cert_machine::{Bundle, CertificateParameters, Subject};
 use config_parser::{Config, Instance, User};
 use create_symlink;
+use kubeconfig::create_kubeconfig;
+use kubeconfig::KubeconfigParameters;
 use openssl::bn::BigNum;
 use openssl::pkey::PKey;
 use openssl::rsa::Rsa;
@@ -37,7 +39,12 @@ pub fn opt_str(opt_string: &Option<String>) -> Option<&str> {
     }
 }
 
-pub fn write_bundle_to_file(bundle: &Bundle, out_dir: &str, filename: &str, overwrite: bool) -> Result<(), io::Error> {
+pub fn write_bundle_to_file(
+    bundle: &Bundle,
+    out_dir: &str,
+    filename: &str,
+    overwrite: bool,
+) -> Result<(), io::Error> {
     let sn = bundle.cert.serial_number().to_bn().unwrap();
     let (crt_filename, key_filename) = match filename {
         "ca" => {
@@ -188,16 +195,24 @@ pub fn gen_main_ca_cert(config: &Config) -> Result<Box<Bundle>, &'static str> {
     ca_cert.gen_cert()
 }
 
-pub fn gen_ca_cert(cn: &str, main_ca: Option<&Box<Bundle>>, config: &Config) -> Result<Box<Bundle>, &'static str> {
+pub fn gen_ca_cert(
+    cn: &str,
+    main_ca: Option<&Box<Bundle>>,
+    config: &Config,
+) -> Result<Box<Bundle>, &'static str> {
     let mut ca_cert = CertificateParameters::ca(&cn, config.ca.key_size, config.ca.validity_days);
     ca_cert.ca = main_ca;
     ca_cert.gen_cert()
 }
 
-pub fn gen_kubelet_cert(worker: &Instance, ca: Option<&Box<Bundle>>, config: &Config,) -> Result<Box<Bundle>, &'static str> {
+pub fn gen_kubelet_cert(
+    worker: &Instance,
+    ca: &Box<Bundle>,
+    config: &Config,
+) -> Result<Box<Bundle>, &'static str> {
     println!("Creating cert for node: {}", worker.hostname);
 
-    let mut cert_filename = match worker.filename {
+    let cert_filename = match worker.filename {
         Some(ref filename) => filename.to_owned(),
         None => worker.hostname.clone(),
     };
@@ -214,25 +229,65 @@ pub fn gen_kubelet_cert(worker: &Instance, ca: Option<&Box<Bundle>>, config: &Co
         ),
     };
     client_cert.subject.organization = Some("system:nodes");
-    client_cert.ca = ca;
+    client_cert.ca = Some(ca);
 
     let bundle = client_cert.gen_cert()?;
-    let node_cert_path = format!("{}/{}/node-kubeconfig", &config.out_dir, &cert_filename);
+    // let node_cert_path = format!("{}/{}/node-kubeconfig", &config.out_dir, &cert_filename);
     let outdir = format!("{}/CA/root", &config.out_dir);
 
-    cert_filename.push_str("-kubeconfig");
+    // cert_filename.push_str("-kubeconfig");
 
     match write_bundle_to_file(&bundle, &outdir, &cert_filename, config.overwrite) {
         Ok(_) => (),
         Err(err) => panic!("Error, when writing cert: {}", err),
     }
-    let sn = &bundle.cert.serial_number().to_bn().unwrap();
-    let cert_name = format!("{}-{}", &cert_filename, sn);
-    create_symlink("../CA/root", &cert_name, &node_cert_path);
+    // let sn = &bundle.cert.serial_number().to_bn().unwrap();
+    // let cert_name = format!("{}-{}", &cert_filename, sn);
+    // create_symlink("../CA/root", &cert_name, &node_cert_path);
+    {
+        let kubeconfig_filename = format!("{}/{}/node.kubeconfig", &config.out_dir, &cert_filename);
+        let kubeconfig_parameters = KubeconfigParameters {
+            apiserver_address: &config.apiserver_internal_address,
+            cluster_name: &config.cluster_name,
+            username: "system:kube-controller-manager",
+            cert: &bundle,
+            ca_cert: ca,
+            kubeconfig_filename: &kubeconfig_filename,
+        };
+        create_kubeconfig(&kubeconfig_parameters).unwrap();
+    }
+
+    let kube_proxy_kubeconfig = format!("../kube-proxy.kubeconfig");
+    let kube_proxy_symlink = format!("{}/{}/kube-proxy.kubeconfig", &config.out_dir, &cert_filename);
+
+    if let Err(_) =  symlink(&kube_proxy_kubeconfig, &kube_proxy_symlink) {
+        match fs::symlink_metadata(&kube_proxy_symlink) {
+            Ok(ref metadata) => {
+                match metadata.file_type().is_symlink() {
+                    true => {
+                        fs::remove_file(&kube_proxy_symlink).unwrap();
+                        symlink(&kube_proxy_kubeconfig, &kube_proxy_symlink).unwrap();
+                    },
+                    false => {
+                        eprintln!("Unable to create symlink. \"{}\" exists and not a symlink!", &kube_proxy_symlink);
+                        exit(1);
+                    },
+                }
+            },
+            Err(err) => {
+                panic!("Unable to create symlink: {}", err);
+            },
+        }
+    }
+
     Ok(bundle)
 }
 
-pub fn gen_kubelet_server_cert(worker: &Instance, ca: Option<&Box<Bundle>>, config: &Config) -> Result<Box<Bundle>, &'static str> {
+pub fn gen_kubelet_server_cert(
+    worker: &Instance,
+    ca: Option<&Box<Bundle>>,
+    config: &Config,
+) -> Result<Box<Bundle>, &'static str> {
     println!("Creating server cert for node: {}", worker.hostname);
 
     let cert_filename = match worker.filename {
@@ -266,7 +321,11 @@ pub fn gen_kubelet_server_cert(worker: &Instance, ca: Option<&Box<Bundle>>, conf
     Ok(bundle)
 }
 
-pub fn gen_etcd_cert(worker: &Instance, ca: Option<&Box<Bundle>>, config: &Config) -> Result<Box<Bundle>, &'static str> {
+pub fn gen_etcd_cert(
+    worker: &Instance,
+    ca: Option<&Box<Bundle>>,
+    config: &Config,
+) -> Result<Box<Bundle>, &'static str> {
     println!("Creating cert for etcd node: {}", worker.hostname);
     let cert_filename = match worker.filename {
         Some(ref filename) => filename.to_owned(),
@@ -300,13 +359,13 @@ pub fn gen_etcd_cert(worker: &Instance, ca: Option<&Box<Bundle>>, config: &Confi
     Ok(bundle)
 }
 
-pub fn gen_etcd_user(username: &str, ca: Option<&Box<Bundle>>, config: &Config) -> Result<Box<Bundle>, &'static str> {
+pub fn gen_etcd_user(
+    username: &str,
+    ca: Option<&Box<Bundle>>,
+    config: &Config,
+) -> Result<Box<Bundle>, &'static str> {
     let index_filename = format!("{}/CA/etcd/index", &config.out_dir);
-    let mut cert = CertificateParameters::client(
-        &username,
-        config.key_size,
-        config.validity_days,
-    );
+    let mut cert = CertificateParameters::client(&username, config.key_size, config.validity_days);
     cert.serial_number = match get_sn(&index_filename) {
         Ok(sn) => sn + 1,
         Err(err) => {
@@ -361,29 +420,63 @@ pub fn admin_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -> Resu
     admin.serial_number = serial_number;
     let bundle = admin.gen_cert()?;
     let main_ca_dir = format!("{}/CA/root", &config.out_dir);
-    let filename = format!("admin-{}", bundle.cert.serial_number().to_bn().unwrap());
-    let symlink_path = format!("{}/master/admin", &config.out_dir);
+    // let filename = format!("admin-{}", bundle.cert.serial_number().to_bn().unwrap());
+    // let symlink_path = format!("{}/master/admin", &config.out_dir);
     write_bundle_to_file(&bundle, &main_ca_dir, "admin", config.overwrite).unwrap();
-    create_symlink("../CA/root", &filename, &symlink_path);
+    // create_symlink("../CA/root", &filename, &symlink_path);
+    {
+        let kubeconfig_filename = format!("{}/users/admin.kubeconfig", &config.out_dir);
+        let kubeconfig_parameters = KubeconfigParameters {
+            apiserver_address: &config.apiserver_external_address,
+            cluster_name: &config.cluster_name,
+            username: "admin",
+            cert: &bundle,
+            ca_cert: &ca,
+            kubeconfig_filename: &kubeconfig_filename,
+        };
+        create_kubeconfig(&kubeconfig_parameters).unwrap();
+    }
     Ok(bundle)
 }
 
-pub fn user_cert(ca: &Box<Bundle>, config: &Config, user: &User, serial_number: u32) -> Result<Box<Bundle>, &'static str> {
-    let mut user_cert = CertificateParameters::client(&user.username, config.key_size, config.validity_days);
+pub fn user_cert(
+    ca: &Box<Bundle>,
+    config: &Config,
+    user: &User,
+    serial_number: u32,
+) -> Result<Box<Bundle>, &'static str> {
+    let mut user_cert =
+        CertificateParameters::client(&user.username, config.key_size, config.validity_days);
     user_cert.subject.organization = opt_str(&user.group);
     user_cert.ca = Some(&ca);
     user_cert.serial_number = serial_number;
     let bundle = user_cert.gen_cert()?;
     let outdir = format!("{}/CA/root", &config.out_dir);
     write_bundle_to_file(&bundle, &outdir, &user.username, config.overwrite).unwrap();
-    let cn = &bundle.cert.serial_number().to_bn().unwrap();
-    let cert_name = format!("{}-{}", &user.username, cn);
-    let node_cert_path = format!("{}/users/{}", &config.out_dir, &user.username);
-    create_symlink("../CA/root", &cert_name, &node_cert_path);
+    // let cn = &bundle.cert.serial_number().to_bn().unwrap();
+    // let cert_name = format!("{}-{}", &user.username, cn);
+    // let node_cert_path = format!("{}/users/{}", &config.out_dir, &user.username);
+    // create_symlink("../CA/root", &cert_name, &node_cert_path);
+    {
+        let kubeconfig_filename = format!("{}/users/{}.kubeconfig", &config.out_dir, &user.username);
+        let kubeconfig_parameters = KubeconfigParameters {
+            apiserver_address: &config.apiserver_external_address,
+            cluster_name: &config.cluster_name,
+            username: &user.username,
+            cert: &bundle,
+            ca_cert: &ca,
+            kubeconfig_filename: &kubeconfig_filename,
+        };
+        create_kubeconfig(&kubeconfig_parameters).unwrap();
+    }
     Ok(bundle)
 }
 
-pub fn apiserver_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -> Result<Box<Bundle>, &'static str> {
+pub fn apiserver_cert(
+    ca: &Box<Bundle>,
+    config: &Config,
+    serial_number: u32,
+) -> Result<Box<Bundle>, &'static str> {
     println!("Creating cert for Kubernetes API server");
     let mut san: Vec<&str> = vec![
         "kubernetes",
@@ -409,7 +502,11 @@ pub fn apiserver_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -> 
     Ok(bundle)
 }
 
-pub fn apiserver_client_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -> Result<Box<Bundle>, &'static str> {
+pub fn apiserver_client_cert(
+    ca: &Box<Bundle>,
+    config: &Config,
+    serial_number: u32,
+) -> Result<Box<Bundle>, &'static str> {
     println!("Creating cert for Kubernetes API server kubelet client");
     let mut api_client = CertificateParameters::client(
         "kube-apiserver-kubelet-client",
@@ -421,14 +518,27 @@ pub fn apiserver_client_cert(ca: &Box<Bundle>, config: &Config, serial_number: u
     api_client.serial_number = serial_number;
     let bundle = api_client.gen_cert()?;
     let main_ca_dir = format!("{}/CA/root", &config.out_dir);
-    let filename = format!("apiserver-kubelet-client-{}", bundle.cert.serial_number().to_bn().unwrap());
+    let filename = format!(
+        "apiserver-kubelet-client-{}",
+        bundle.cert.serial_number().to_bn().unwrap()
+    );
     let symlink_path = format!("{}/master/apiserver-kubelet-client", &config.out_dir);
-    write_bundle_to_file(&bundle, &main_ca_dir, "apiserver-kubelet-client", config.overwrite).unwrap();
+    write_bundle_to_file(
+        &bundle,
+        &main_ca_dir,
+        "apiserver-kubelet-client",
+        config.overwrite,
+    )
+    .unwrap();
     create_symlink("../CA/root", &filename, &symlink_path);
     Ok(bundle)
 }
 
-pub fn apiserver_etcd_client_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -> Result<Box<Bundle>, &'static str> {
+pub fn apiserver_etcd_client_cert(
+    ca: &Box<Bundle>,
+    config: &Config,
+    serial_number: u32,
+) -> Result<Box<Bundle>, &'static str> {
     println!("Creating cert for Kubernetes ETCD client");
     let mut api_client = CertificateParameters::client(
         // If etcd auth enable and apiserver etcd username is not root
@@ -442,14 +552,27 @@ pub fn apiserver_etcd_client_cert(ca: &Box<Bundle>, config: &Config, serial_numb
     api_client.serial_number = serial_number;
     let bundle = api_client.gen_cert()?;
     let etcd_ca_dir = format!("{}/CA/etcd", &config.out_dir);
-    let filename = format!("apiserver-etcd-client-{}", bundle.cert.serial_number().to_bn().unwrap());
+    let filename = format!(
+        "apiserver-etcd-client-{}",
+        bundle.cert.serial_number().to_bn().unwrap()
+    );
     let symlink_path = format!("{}/master/apiserver-etcd-client", &config.out_dir);
-    write_bundle_to_file(&bundle, &etcd_ca_dir, "apiserver-etcd-client", config.overwrite).unwrap();
+    write_bundle_to_file(
+        &bundle,
+        &etcd_ca_dir,
+        "apiserver-etcd-client",
+        config.overwrite,
+    )
+    .unwrap();
     create_symlink("../CA/etcd", &filename, &symlink_path);
     Ok(bundle)
 }
 
-pub fn controller_manager_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -> Result<Box<Bundle>, &'static str> {
+pub fn controller_manager_cert(
+    ca: &Box<Bundle>,
+    config: &Config,
+    serial_number: u32,
+) -> Result<Box<Bundle>, &'static str> {
     println!("Creating cert for Kubernetes controller-manager");
     let mut kube_cm = CertificateParameters::client(
         "system:kube-controller-manager",
@@ -461,14 +584,39 @@ pub fn controller_manager_cert(ca: &Box<Bundle>, config: &Config, serial_number:
     kube_cm.ca = Some(&ca);
     let bundle = kube_cm.gen_cert()?;
     let main_ca_dir = format!("{}/CA/root", &config.out_dir);
-    let filename = format!("kube-controller-manager-{}", bundle.cert.serial_number().to_bn().unwrap());
-    let symlink_path = format!("{}/master/kube-controller-manager", &config.out_dir);
-    write_bundle_to_file(&bundle, &main_ca_dir, "kube-controller-manager", config.overwrite).unwrap();
-    create_symlink("../CA/root", &filename, &symlink_path);
+    // let filename = format!(
+    //     "kube-controller-manager-{}",
+    //     bundle.cert.serial_number().to_bn().unwrap()
+    // );
+    // let symlink_path = format!("{}/master/kube-controller-manager", &config.out_dir);
+    write_bundle_to_file(
+        &bundle,
+        &main_ca_dir,
+        "kube-controller-manager",
+        config.overwrite,
+    )
+    .unwrap();
+    // create_symlink("../CA/root", &filename, &symlink_path);
+    {
+        let kubeconfig_filename = format!("{}/master/kube-controller-manager.kubeconfig", &config.out_dir);
+        let kubeconfig_parameters = KubeconfigParameters {
+            apiserver_address: &config.apiserver_internal_address,
+            cluster_name: &config.cluster_name,
+            username: "system:kube-controller-manager",
+            cert: &bundle,
+            ca_cert: &ca,
+            kubeconfig_filename: &kubeconfig_filename,
+        };
+        create_kubeconfig(&kubeconfig_parameters).unwrap();
+    }
     Ok(bundle)
 }
 
-pub fn scheduler_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -> Result<Box<Bundle>, &'static str> {
+pub fn scheduler_cert(
+    ca: &Box<Bundle>,
+    config: &Config,
+    serial_number: u32,
+) -> Result<Box<Bundle>, &'static str> {
     println!("Creating cert for Kubernetes scheduler");
     let mut scheduler = CertificateParameters::client(
         "system:kube-scheduler",
@@ -480,14 +628,33 @@ pub fn scheduler_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -> 
     scheduler.serial_number = serial_number;
     let bundle = scheduler.gen_cert()?;
     let main_ca_dir = format!("{}/CA/root", &config.out_dir);
-    let filename = format!("kube-scheduler-{}", bundle.cert.serial_number().to_bn().unwrap());
-    let symlink_path = format!("{}/master/kube-scheduler", &config.out_dir);
+    // let filename = format!(
+    //     "kube-scheduler-{}",
+    //     bundle.cert.serial_number().to_bn().unwrap()
+    // );
+    // let symlink_path = format!("{}/master/kube-scheduler", &config.out_dir);
     write_bundle_to_file(&bundle, &main_ca_dir, "kube-scheduler", config.overwrite).unwrap();
-    create_symlink("../CA/root", &filename, &symlink_path);
+    // create_symlink("../CA/root", &filename, &symlink_path);
+    {
+        let kubeconfig_filename = format!("{}/master/kube-scheduler.kubeconfig", &config.out_dir);
+        let kubeconfig_parameters = KubeconfigParameters {
+            apiserver_address: &config.apiserver_internal_address,
+            cluster_name: &config.cluster_name,
+            username: "system:kube-scheduler",
+            cert: &bundle,
+            ca_cert: &ca,
+            kubeconfig_filename: &kubeconfig_filename,
+        };
+        create_kubeconfig(&kubeconfig_parameters).unwrap();
+    }
     Ok(bundle)
 }
 
-pub fn proxy_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -> Result<Box<Bundle>, &'static str> {
+pub fn proxy_cert(
+    ca: &Box<Bundle>,
+    config: &Config,
+    serial_number: u32,
+) -> Result<Box<Bundle>, &'static str> {
     println!("Creating cert for Kubernetes proxy");
     let mut proxy =
         CertificateParameters::client("system:kube-proxy", config.key_size, config.validity_days);
@@ -496,22 +663,41 @@ pub fn proxy_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -> Resu
     proxy.ca = Some(&ca);
     let bundle = proxy.gen_cert()?;
     let main_ca_dir = format!("{}/CA/root", &config.out_dir);
-    let filename = format!("kube-proxy-{}", bundle.cert.serial_number().to_bn().unwrap());
-    let symlink_path = format!("{}/master/kube-proxy", &config.out_dir);
+    // let filename = format!(
+    //     "kube-proxy-{}",
+    //     bundle.cert.serial_number().to_bn().unwrap()
+    // );
+    // let symlink_path = format!("{}/master/kube-proxy", &config.out_dir);
     write_bundle_to_file(&bundle, &main_ca_dir, "kube-proxy", config.overwrite).unwrap();
-    create_symlink("../CA/root", &filename, &symlink_path);
-    for worker in config.worker.iter() {
-        let mut cert_filename = match worker.filename {
-            Some(ref filename) => filename.to_owned(),
-            None => worker.hostname.clone(),
+    // create_symlink("../CA/root", &filename, &symlink_path);
+    // for worker in config.worker.iter() {
+    //     let mut cert_filename = match worker.filename {
+    //         Some(ref filename) => filename.to_owned(),
+    //         None => worker.hostname.clone(),
+    //     };
+    //     let node_symlink_path = format!("{}/{}/kube-proxy", &config.out_dir, &cert_filename);
+    //     create_symlink("../CA/root", &filename, &node_symlink_path);
+    // }
+    {
+        let kubeconfig_filename = format!("{}/kube-proxy.kubeconfig", &config.out_dir);
+        let kubeconfig_parameters = KubeconfigParameters {
+            apiserver_address: &config.apiserver_internal_address,
+            cluster_name: &config.cluster_name,
+            username: "system:kube-proxy",
+            cert: &bundle,
+            ca_cert: &ca,
+            kubeconfig_filename: &kubeconfig_filename,
         };
-        let node_symlink_path = format!("{}/{}/kube-proxy", &config.out_dir, &cert_filename);
-        create_symlink("../CA/root", &filename, &node_symlink_path);
+        create_kubeconfig(&kubeconfig_parameters).unwrap();
     }
     Ok(bundle)
 }
 
-pub fn front_proxy_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -> Result<Box<Bundle>, &'static str> {
+pub fn front_proxy_cert(
+    ca: &Box<Bundle>,
+    config: &Config,
+    serial_number: u32,
+) -> Result<Box<Bundle>, &'static str> {
     println!("Creating cert: front-proxy-client");
     let mut fpc =
         CertificateParameters::client("front-proxy-client", config.key_size, config.validity_days);
@@ -519,9 +705,18 @@ pub fn front_proxy_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -
     fpc.ca = Some(&ca);
     let bundle = fpc.gen_cert()?;
     let front_ca_dir = format!("{}/CA/front-proxy", &config.out_dir);
-    let filename = format!("front-proxy-client-{}", bundle.cert.serial_number().to_bn().unwrap());
+    let filename = format!(
+        "front-proxy-client-{}",
+        bundle.cert.serial_number().to_bn().unwrap()
+    );
     let symlink_path = format!("{}/master/front-proxy-client", &config.out_dir);
-    write_bundle_to_file(&bundle, &front_ca_dir, "front-proxy-client", config.overwrite).unwrap();
+    write_bundle_to_file(
+        &bundle,
+        &front_ca_dir,
+        "front-proxy-client",
+        config.overwrite,
+    )
+    .unwrap();
     create_symlink("../CA/front-proxy", &filename, &symlink_path);
     Ok(bundle)
 }
@@ -564,10 +759,14 @@ pub fn gen_cert(ca: &CA, config: &Config, cert_type: &CertType) -> Result<Box<Bu
         }
         CertType::Scheduler => scheduler_cert(&ca.main_ca, &config, sn),
         CertType::Proxy => proxy_cert(&ca.main_ca, &config, sn),
-        CertType::EtcdServer(etcd_instance) => gen_etcd_cert(&etcd_instance, Some(&ca.etcd_ca), &config),
+        CertType::EtcdServer(etcd_instance) => {
+            gen_etcd_cert(&etcd_instance, Some(&ca.etcd_ca), &config)
+        }
         CertType::EtcdUser(username) => gen_etcd_user(&username, Some(&ca.etcd_ca), &config),
-        CertType::Kubelet(ref worker) => gen_kubelet_cert(&worker, Some(&ca.main_ca), &config),
-        CertType::KubeletServer(ref worker) => gen_kubelet_server_cert(&worker, Some(&ca.main_ca), &config),
-        CertType::User(ref user) => user_cert(&ca.main_ca, &config, &user, sn)
+        CertType::Kubelet(ref worker) => gen_kubelet_cert(&worker, &ca.main_ca, &config),
+        CertType::KubeletServer(ref worker) => {
+            gen_kubelet_server_cert(&worker, Some(&ca.main_ca), &config)
+        }
+        CertType::User(ref user) => user_cert(&ca.main_ca, &config, &user, sn),
     }
 }

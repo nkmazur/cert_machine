@@ -8,6 +8,7 @@ extern crate openssl;
 mod arg_parser;
 mod config_parser;
 mod kubernetes_certs;
+mod kubeconfig;
 
 use config_parser::User;
 use config_parser::Instance;
@@ -139,7 +140,7 @@ fn create_symlink(ca_dir: &str, cert_name: &str, dest: &str) {
                     }
                 },
                 Err(err) => {
-                    panic!("Enable to create symlink: {}", err);
+                    panic!("Unable to create symlink: {}", err);
                 },
             }
         }
@@ -165,6 +166,8 @@ fn main() {
                     panic!("Error when creating certificate authority: {}", err);
                 },
             };
+
+            kubernetes_certs::kube_certs(&ca, &config, &config.out_dir);
 
             for instance in config.worker.iter() {
                 let mut cert_filename = match instance.filename {
@@ -199,7 +202,6 @@ fn main() {
                     gen_cert(&ca, &config, &CertType::EtcdUser(&user)).unwrap();
                 }
             }
-            kubernetes_certs::kube_certs(&ca, &config, &config.out_dir);
         },
         Some(Command::InitCa(_)) => {
             match create_ca(&config) {
