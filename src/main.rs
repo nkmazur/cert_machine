@@ -1,11 +1,10 @@
 #[macro_use]
 extern crate serde_derive;
-#[macro_use]
-extern crate gumdrop;
 extern crate cert_machine;
 extern crate openssl;
+extern crate clap;
 
-mod arg_parser;
+// mod arg_parser;
 mod config_parser;
 mod kubernetes_certs;
 mod kubeconfig;
@@ -18,15 +17,15 @@ use std::os::unix::fs::symlink;
 use std::process::exit;
 use std::fs::OpenOptions;
 use std::fs;
+use std::path::Path;
 use kubernetes_certs::gen_cert;
 use kubernetes_certs::CertType;
 use kubernetes_certs::gen_main_ca_cert;
 use cert_machine::Bundle;
 use kubernetes_certs::gen_ca_cert;
 use kubernetes_certs::write_bundle_to_file;
-use arg_parser::{CommandOptions, Command};
 use config_parser::Config;
-use gumdrop::Options;
+use clap::{App, Arg, SubCommand, AppSettings};
 
 pub struct CA {
     pub main_ca: Box<Bundle>,
@@ -147,17 +146,68 @@ fn create_symlink(ca_dir: &str, cert_name: &str, dest: &str) {
     }
 }
 
-
 fn main() {
-    let opts = CommandOptions::parse_args_default_or_exit();
-    let config_filename = opts.config.unwrap_or("config.toml".to_owned());
-    let mut config = Config::new(&config_filename);
-    if let Some(opts_outdir) = opts.outdir {
-        config.out_dir = opts_outdir.to_owned();
-    }
+    let matches = App::new("cert-machine")
+        .about("TLS certificates generation tool for kubernetes")
+        .version("1.0")
+		.setting(AppSettings::SubcommandRequiredElseHelp)
+        .setting(AppSettings::DisableHelpSubcommand)
+        .setting(AppSettings::VersionlessSubcommands)
+        .arg(Arg::with_name("config")
+        	.short("c")
+            .long("config")
+            .value_name("FILE")
+            .default_value("config.toml")
+            .help("Sets a custom config file")
+            .takes_value(true))
+        .arg(Arg::with_name("outdir")
+        	.short("o")
+            .long("outdir")
+            .value_name("DIR")
+            .help("Sets an output directory")
+            .takes_value(true))
+        .subcommand(SubCommand::with_name("new")
+            .about("Creates new CA and certificates"))
+        .subcommand(SubCommand::with_name("gen-cert")
+            .about("Create new certificate for something")
+            .arg(Arg::with_name("kind")
+                .required(true)
+                .possible_values(&["admin",
+                                   "apiserver",
+                                   "apiserver-client",
+                                   "apiserver-etcd-client",
+                                   "controller-manager",
+                                   "scheduler",
+                                   "front-proxy-client",
+                                   "proxy",
+                                   "kubelet",
+                                   "etcd",
+                                   "etcd-user",
+                                   "user"])
+                .help("kind of certificate"))
+            .arg(Arg::with_name("name")
+                .required_if("kind", "kubelet")
+                .required_if("kind", "etcd-user")
+                .required_if("kind", "user")
+                .required_if("kind", "etcd")
+                .help("name of instance or username"))
+            .arg(Arg::with_name("group")
+                .help("group for user")))
+        .get_matches();
 
-    match opts.command {
-        Some(Command::New(_)) => {
+        let config_filename = matches.value_of("config").unwrap();
+        let mut config = Config::new(&config_filename);
+        if let Some(opts_outdir) = matches.value_of("outdir") {
+            config.out_dir = opts_outdir.to_owned();
+        }
+
+    match matches.subcommand() {
+        ("new", Some(_args)) => {
+            let ca_dir = format!("{}/CA", &config.out_dir);
+            if Path::new(&ca_dir).exists() {
+                eprintln!("CA alredy exists in directory: {}", &config.out_dir);
+                exit(1);
+            }
             kubernetes_certs::create_directory_struct(&config, &config.out_dir).unwrap();
 
             let ca = match create_ca(&config) {
@@ -203,17 +253,9 @@ fn main() {
                 }
             }
         },
-        Some(Command::InitCa(_)) => {
-            match create_ca(&config) {
-                Ok(ca) => ca,
-                Err(err) => {
-                    panic!("Error when creating certificate authority: {}", err);
-                },
-            };
-        },
-        Some(Command::GenCert(options)) => {
+        ("gen-cert", Some(args)) =>{
             let ca = CA::read_from_fs(&config.out_dir);
-            match options.kind.as_ref() {
+            match args.value_of("kind").unwrap() {
                 "admin" => {
                     gen_cert(&ca, &config, &CertType::Admin).unwrap();
                     ()
@@ -246,18 +288,18 @@ fn main() {
                     gen_cert(&ca, &config, &CertType::Proxy).unwrap();
                     ()
                 },
-                kind if kind.starts_with("kubelet:") => {
-                    let hostname = kind.clone().split_at(8);
-                    println!("Gen cert for {} node!", hostname.1);
+                "kubelet" => {
+                    let hostname = args.value_of("name").unwrap();
+                    println!("Gen cert for {} node!", &hostname);
 
                     let mut instances: HashMap<&str, &Instance> = HashMap::new();
                     for instance in config.worker.iter() {
                         instances.insert(&instance.hostname, &instance);
                     }
-                    let instance = match instances.get::<str>(&hostname.1) {
+                    let instance = match instances.get::<str>(&hostname) {
                         Some(instance) => instance,
                         None => {
-                            eprintln!("No such kubelet hostname found in config file: {}", &hostname.1);
+                            eprintln!("No such kubelet hostname found in config file: {}", &hostname);
                             exit(1);
                         },
                     };
@@ -271,46 +313,52 @@ fn main() {
                     gen_cert(&ca, &config, &CertType::KubeletServer(&instance)).unwrap();
                     ()
                 },
-                kind if kind.starts_with("etcd:") => {
-                    let hostname = kind.clone().split_at(5);
+                "etcd" => {
+                    let hostname = args.value_of("name").unwrap();
                     let mut instances: HashMap<&str, &Instance> = HashMap::new();
 
                     for instance in config.etcd_server.iter() {
                         instances.insert(&instance.hostname, &instance);
                     }
-                    let instance = match instances.get::<str>(&hostname.1) {
+                    let instance = match instances.get::<str>(&hostname) {
                         Some(instance) => instance,
                         None => {
-                            eprintln!("No such etcd server hostname found in config file: \"{}\"", &hostname.1);
+                            eprintln!("No such etcd server hostname found in config file: \"{}\"", &hostname);
                             exit(1);
                         },
                     };
-                    println!("Gen cert for \"{}\" etcd node!", hostname.1);
+                    println!("Gen cert for \"{}\" etcd node!", hostname);
                     gen_cert(&ca, &config, &CertType::EtcdServer(&instance)).unwrap();
                     ()
                 },
-                kind if kind.starts_with("etcd-user:") => {
-                    let username = kind.clone().split_at(10);
-                    println!("Gen cert for \"{}\" etcd user!", username.1);
-                    gen_cert(&ca, &config, &CertType::EtcdUser(&username.1)).unwrap();
+                "etcd-user" => {
+                    let username = args.value_of("name").unwrap();
+                    println!("Gen cert for \"{}\" etcd user!", username);
+                    gen_cert(&ca, &config, &CertType::EtcdUser(&username)).unwrap();
                     ()
                 },
-                _ => println!("No such certificate kind!"),
+                "user" => {
+                    let username = args.value_of("name").unwrap();
+                    let mut group: Option<String> = None;
+                    // let group = args.value_of("group").to_owned();
+                    print!("Create user cert with name: {}", &username);
+                    let ca = CA::read_from_fs(&config.out_dir);
+                    match args.value_of("group") {
+                        Some(group_name) => {
+                            println!(" and group: {}", &group_name);
+                            group = Some(group_name.to_owned());
+                        },
+                        None => print!("\n"),
+                    }
+                    let user = User {
+                        username: username.to_string(),
+                        group: group,
+                    };
+                    gen_cert(&ca, &config, &CertType::User(&user)).unwrap();
+                },
+                _ => eprintln!("Error!"),
             }
         },
-        Some(Command::User(options)) => {
-            print!("Create user cert with name: {}", options.user);
-            let ca = CA::read_from_fs(&config.out_dir);
-            match options.group {
-                Some(ref group) => println!(" and group: {}", group),
-                None => print!("\n"),
-            }
-            let user = User {
-                username: options.user,
-                group: options.group,
-            };
-            gen_cert(&ca, &config, &CertType::User(&user)).unwrap();
-        },
-        None => (),
+        _ => unreachable!(),
     }
 }
