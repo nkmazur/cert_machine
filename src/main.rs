@@ -118,7 +118,7 @@ fn create_ca(config: &Config) -> Result<CA, &'static str> {
     })
 }
 
-fn create_symlink(ca_dir: &str, cert_name: &str, dest: &str) {
+fn create_cert_symlink(ca_dir: &str, cert_name: &str, dest: &str) {
     let types = vec![("key", "keys"), ("crt", "certs")];
     for postfix in types.iter() {
         let source_filename = format!("{}/{}/{}.{}", &ca_dir, &postfix.1, &cert_name, &postfix.0);
@@ -142,6 +142,28 @@ fn create_symlink(ca_dir: &str, cert_name: &str, dest: &str) {
                     panic!("Unable to create symlink: {}", err);
                 },
             }
+        }
+    }
+}
+
+fn create_symlink(source_pach: &str, symlink_path: &str) {
+    if let Err(err) =  symlink(&source_pach, &symlink_path) {
+        match fs::symlink_metadata(&symlink_path) {
+            Ok(ref metadata) => {
+                match metadata.file_type().is_symlink() {
+                    true => {
+                        fs::remove_file(&symlink_path).unwrap();
+                        symlink(&source_pach, &symlink_path).unwrap();
+                    },
+                    false => {
+                        eprintln!("Unable to create symlink. \"{}\": {}", &symlink_path, &err);
+                        exit(1);
+                    },
+                }
+            },
+            Err(err) => {
+                panic!("Unable to create symlink: {}", err);
+            },
         }
     }
 }
@@ -309,6 +331,9 @@ fn main() {
                     };
                     let node_path = format!("{}/{}", &config.out_dir, &cert_filename);
                     fs::create_dir_all(&node_path).unwrap();
+                    let ca_cert_path = format!("../CA/root/certs/ca.crt");
+                    let ca_cert_symlink = format!("{}/ca.crt", &node_path);
+                    create_symlink(&ca_cert_path, &ca_cert_symlink);
                     gen_cert(&ca, &config, &CertType::Kubelet(&instance)).unwrap();
                     gen_cert(&ca, &config, &CertType::KubeletServer(&instance)).unwrap();
                     ()
@@ -327,6 +352,15 @@ fn main() {
                             exit(1);
                         },
                     };
+                    let dirname = match instance.filename {
+                        Some(ref dir_name) => dir_name.clone(),
+                        None => instance.hostname.clone(),
+                    };
+                    let node_path = format!("{}/{}", &config.out_dir, &dirname);
+                    fs::create_dir_all(&node_path).unwrap();
+                    let ca_cert_path = format!("../CA/etcd/certs/ca.crt");
+                    let ca_cert_symlink = format!("{}/etcd-ca.crt", &node_path);
+                    create_symlink(&ca_cert_path, &ca_cert_symlink);
                     println!("Gen cert for \"{}\" etcd node!", hostname);
                     gen_cert(&ca, &config, &CertType::EtcdServer(&instance)).unwrap();
                     ()

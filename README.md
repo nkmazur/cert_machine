@@ -10,7 +10,10 @@ Cert_machine provides functionality for creating and manage certificate authorit
 ```toml
 cluster_name = "Test kubernetes cluster"  # Common name for certificate authority
 validity_days = 365  # Validity in days for non CA certificates
-master_san = ["10.0.21.1", "10.0.21.2", "10.0.21.3", "m1-test", "m2-test", "m3-test"]  # SAN for kube-apiserver certificate
+master_san = ["10.0.21.1", "10.0.21.2", "10.0.21.3", "10.96.0.1", "m1-test", "m2-test", "m3-test"]  # SAN for kube-apiserver certificate
+apiserver_internal_address = "10.0.21.1:6443"  # Apiserver address which will be writen in all kubeconfig files exclude admin.kubeconfig
+apiserver_external_address = "192.0.2.1:6443"  # Apiserver address which will be writen in admin and user kubeconfigs
+etcd_users = ["calico"]  # Additional user certs for etcd. Optional
 
 [[worker]]  # Worker node section
 hostname = "s1.test" # Hostname of worker node
