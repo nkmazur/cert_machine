@@ -1,4 +1,4 @@
-use create_symlink;
+// use create_symlink;
 use cert_machine::{Bundle, CertificateParameters, Subject};
 use config_parser::{Config, Instance, User};
 use create_cert_symlink;
@@ -246,7 +246,7 @@ pub fn gen_kubelet_cert(
         let kubeconfig_parameters = KubeconfigParameters {
             apiserver_address: &config.apiserver_internal_address,
             cluster_name: &config.cluster_name,
-            username: "system:kube-controller-manager",
+            username: &cn,
             cert: &bundle,
             ca_cert: ca,
             kubeconfig_filename: &kubeconfig_filename,
@@ -402,14 +402,14 @@ pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
     let sa_pub_symlink = format!("{}/master/sa.pub", &out_dir);
     let sa_key_filename = format!("{}/sa.key", &out_dir);
     let sa_key_symlink = format!("{}/master/sa.key", &out_dir);
-    let etcd_ca_cert_path = format!("{}/CA/etcd/certs/ca.crt", &config.out_dir);
-    let cetcd_ca_cert_symlink = format!("{}/etcd-users/etcd-ca.crt", &config.out_dir);
+    // let etcd_ca_cert_path = format!("../CA/etcd/certs/ca.crt");
+    let etcd_ca_cert_symlink = format!("{}/etcd-users/etcd-ca.crt", &config.out_dir);
 
     fs::write(&sa_pub_filename, pkey).expect("Unable to write file!");
     fs::write(&sa_key_filename, key).expect("Unable to write file!");
     symlink("../sa.pub", &sa_pub_symlink).unwrap();
     symlink("../sa.key", &sa_key_symlink).unwrap();
-    symlink(&etcd_ca_cert_path, &cetcd_ca_cert_symlink).unwrap();
+    symlink("../CA/etcd/certs/ca.crt", &etcd_ca_cert_symlink).unwrap();
 }
 
 pub fn admin_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -> Result<Box<Bundle>, &'static str> {
