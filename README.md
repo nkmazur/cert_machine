@@ -47,4 +47,5 @@ cert-machine gen-cert kubelet s1.test  # Create new certificates for node 's1.te
 cert-machine -c my-cluster.toml -o my_cluster new # Create new CA and certs using
 # config file 'my-cluster.toml' and write to directory my_cluster
 cert-machine gen-cert etcd-user calico  # Create cert for etcd user
+cert-machine refresh-all # Create new certificates for masters, etcd and workers
 ```

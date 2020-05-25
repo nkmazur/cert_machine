@@ -21,6 +21,7 @@ use std::path::Path;
 use kubernetes_certs::gen_cert;
 use kubernetes_certs::CertType;
 use kubernetes_certs::gen_main_ca_cert;
+use kubernetes_certs::refresh_master_certs;
 use cert_machine::Bundle;
 use kubernetes_certs::gen_ca_cert;
 use kubernetes_certs::write_bundle_to_file;
@@ -190,6 +191,8 @@ fn main() {
             .takes_value(true))
         .subcommand(SubCommand::with_name("new")
             .about("Creates new CA and certificates"))
+        .subcommand(SubCommand::with_name("refresh-all")
+            .about("Create new certificates for all components except service-account key, users and etcd-users"))
         .subcommand(SubCommand::with_name("gen-cert")
             .about("Create new certificate for something")
             .arg(Arg::with_name("kind")
@@ -242,7 +245,7 @@ fn main() {
             kubernetes_certs::kube_certs(&ca, &config, &config.out_dir);
 
             for instance in config.worker.iter() {
-                let mut cert_filename = match instance.filename {
+                let cert_filename = match instance.filename {
                     Some(ref filename) => filename.to_owned(),
                     None => instance.hostname.clone(),
                 };
@@ -253,7 +256,7 @@ fn main() {
             }
 
             for instance in config.etcd_server.iter() {
-                let mut cert_filename = match instance.filename {
+                let cert_filename = match instance.filename {
                     Some(ref filename) => filename.to_owned(),
                     None => instance.hostname.clone(),
                 };
@@ -274,6 +277,38 @@ fn main() {
                     gen_cert(&ca, &config, &CertType::EtcdUser(&user)).unwrap();
                 }
             }
+        },
+        ("refresh-all", Some(_args)) => {
+            let ca = CA::read_from_fs(&config.out_dir);
+            for instance in config.worker.iter() {
+                let cert_filename = match instance.filename {
+                    Some(ref filename) => filename.to_owned(),
+                    None => instance.hostname.clone(),
+                };
+                let node_path = format!("{}/{}", &config.out_dir, &cert_filename);
+                fs::create_dir_all(&node_path).unwrap();
+                let ca_symlink = format!("{}/{}/ca.crt", &config.out_dir, &cert_filename);
+                if !!!Path::new(&ca_symlink).exists() {
+                    symlink("../CA/root/certs/ca.crt", &ca_symlink).unwrap();
+                }
+                gen_cert(&ca, &config, &CertType::Kubelet(&instance)).unwrap();
+                gen_cert(&ca, &config, &CertType::KubeletServer(&instance)).unwrap();
+            }
+
+            for instance in config.etcd_server.iter() {
+                let cert_filename = match instance.filename {
+                    Some(ref filename) => filename.to_owned(),
+                    None => instance.hostname.clone(),
+                };
+                let node_path = format!("{}/{}", &config.out_dir, &cert_filename);
+                fs::create_dir_all(&node_path).unwrap();
+                let ca_symlink = format!("{}/{}/etcd-ca.crt", &config.out_dir, &cert_filename);
+                if !!!Path::new(&ca_symlink).exists() {
+                    symlink("../CA/etcd/certs/ca.crt", &ca_symlink).unwrap();
+                }
+                gen_cert(&ca, &config, &CertType::EtcdServer(&instance)).unwrap();
+            }
+            refresh_master_certs(&ca, &config);
         },
         ("gen-cert", Some(args)) =>{
             let ca = CA::read_from_fs(&config.out_dir);
@@ -325,7 +360,7 @@ fn main() {
                             exit(1);
                         },
                     };
-                    let mut cert_filename = match instance.filename {
+                    let cert_filename = match instance.filename {
                         Some(ref filename) => filename.to_owned(),
                         None => instance.hostname.clone(),
                     };

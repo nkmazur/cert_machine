@@ -412,6 +412,16 @@ pub fn kube_certs(ca: &CA, config: &Config, out_dir: &str) {
     symlink("../CA/etcd/certs/ca.crt", &etcd_ca_cert_symlink).unwrap();
 }
 
+pub fn refresh_master_certs(ca: &CA, config: &Config) {
+    gen_cert(&ca, &config, &CertType::ApiServer).unwrap();
+    gen_cert(&ca, &config, &CertType::ApiServerClient).unwrap();
+    gen_cert(&ca, &config, &CertType::ApiServerEtcdClient).unwrap();
+    gen_cert(&ca, &config, &CertType::ControllerManager).unwrap();
+    gen_cert(&ca, &config, &CertType::Scheduler).unwrap();
+    gen_cert(&ca, &config, &CertType::FrontProxy).unwrap();
+    gen_cert(&ca, &config, &CertType::Proxy).unwrap();
+}
+
 pub fn admin_cert(ca: &Box<Bundle>, config: &Config, serial_number: u32) -> Result<Box<Bundle>, &'static str> {
     println!("Creating cert for Kubernetes admin");
     let mut admin = CertificateParameters::client("admin", config.key_size, config.validity_days);
